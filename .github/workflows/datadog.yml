@@ -25,6 +25,16 @@ jobs:
             exit 1
           fi
       
+      # Determine alert type based on secret status
+      - name: Set alert type
+        id: set_alert
+        run: |
+          if [ "${{ steps.secret_check.outputs.secret_status }}" == "exists" ]; then
+            echo "alert_type=info" >> $GITHUB_OUTPUT
+          else
+            echo "alert_type=error" >> $GITHUB_OUTPUT
+          fi
+      
       # Datadog monitoring step
       - name: Send metrics to Datadog
         uses: DataDog/datadog-ci@v2
@@ -35,7 +45,7 @@ jobs:
             github.actions.secret_check:1|g|#workflow:${{ github.workflow }},status:${{ steps.secret_check.outputs.secret_status }}
             github.actions.job.duration:${{ github.run_id }}|h|#workflow:${{ github.workflow }}
 
-      # Alternative: Send event for monitoring
+      # Send event for monitoring
       - name: Send Datadog Event
         uses: DataDog/datadog-ci@v2
         with:
@@ -44,7 +54,7 @@ jobs:
             {
               "title": "Secret Variable Check - ${{ github.workflow }}",
               "text": "Workflow: ${{ github.workflow }}\nStatus: ${{ steps.secret_check.outputs.secret_status }}\nRun ID: ${{ github.run_id }}",
-              "alert_type": "${{ steps.secret_check.outputs.secret_status == 'exists' ? 'info' : 'error' }}",
+              "alert_type": "${{ steps.set_alert.outputs.alert_type }}",
               "priority": "normal",
               "tags": ["workflow:${{ github.workflow }}", "status:${{ steps.secret_check.outputs.secret_status }}"]
             }
