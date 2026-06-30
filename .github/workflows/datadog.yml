@@ -25,36 +25,19 @@ jobs:
             exit 1
           fi
       
-      # Determine alert type based on secret status
-      - name: Set alert type
-        id: set_alert
+      - name: Send Datadog metrics
         run: |
-          if [ "${{ steps.secret_check.outputs.secret_status }}" == "exists" ]; then
-            echo "alert_type=info" >> $GITHUB_OUTPUT
-          else
-            echo "alert_type=error" >> $GITHUB_OUTPUT
-          fi
-      
-      # Datadog monitoring step
-      - name: Send metrics to Datadog
-        uses: datadog/action-datadog-ci@v1
-        with:
-          api-key: ${{ secrets.DATADOG_API_KEY }}
-          service: github-actions
-          metrics: |
-            github.actions.secret_check:1|g|#workflow:${{ github.workflow }},status:${{ steps.secret_check.outputs.secret_status }}
-            github.actions.job.duration:${{ github.run_id }}|h|#workflow:${{ github.workflow }}
-
-      # Send event for monitoring
-      - name: Send Datadog Event
-        uses: datadog/action-datadog-ci@v1
-        with:
-          api-key: ${{ secrets.DATADOG_API_KEY }}
-          event: |
-            {
-              "title": "Secret Variable Check - ${{ github.workflow }}",
-              "text": "Workflow: ${{ github.workflow }}\nStatus: ${{ steps.secret_check.outputs.secret_status }}\nRun ID: ${{ github.run_id }}",
-              "alert_type": "${{ steps.set_alert.outputs.alert_type }}",
-              "priority": "normal",
-              "tags": ["workflow:${{ github.workflow }}", "status:${{ steps.secret_check.outputs.secret_status }}"]
-            }
+          curl -X POST "https://api.datadoghq.com/api/v1/series" \
+            -H "Content-Type: application/json" \
+            -H "DD-API-KEY: ${{ secrets.DATADOG_API_KEY }}" \
+            -d '{
+              "series": [{
+                "metric": "github.actions.secret.check",
+                "points": [{"timestamp": '$(date +%s)', "value": 1}],
+                "tags": [
+                  "workflow:${{ github.workflow }}",
+                  "status:${{ steps.secret_check.outputs.secret_status }}",
+                  "run_id:${{ github.run_id }}"
+                ]
+              }]
+            }'
