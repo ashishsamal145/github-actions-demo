@@ -1,0 +1,50 @@
+name: Testing Secret Variables
+
+on:
+  workflow_dispatch
+
+env:
+  ACTIONS_STEP_DEBUG: true
+
+jobs:
+  test_secret_variables:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: "Checking Secret Variable"
+        id: secret_check
+        run: |
+          if [ -n "${{ secrets.MY_KEY }}" ]; then
+            echo "Secret exists (value hidden)"
+            echo "secret_status=exists" >> $GITHUB_OUTPUT
+          else
+            echo "Secret is missing"
+            echo "secret_status=missing" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+      
+      # Datadog monitoring step
+      - name: Send metrics to Datadog
+        uses: DataDog/datadog-ci@v2
+        with:
+          api-key: ${{ secrets.DATADOG_API_KEY }}
+          service: github-actions
+          metrics: |
+            github.actions.secret_check:1|g|#workflow:${{ github.workflow }},status:${{ steps.secret_check.outputs.secret_status }}
+            github.actions.job.duration:${{ github.run_id }}|h|#workflow:${{ github.workflow }}
+
+      # Alternative: Send event for monitoring
+      - name: Send Datadog Event
+        uses: DataDog/datadog-ci@v2
+        with:
+          api-key: ${{ secrets.DATADOG_API_KEY }}
+          event: |
+            {
+              "title": "Secret Variable Check - ${{ github.workflow }}",
+              "text": "Workflow: ${{ github.workflow }}\nStatus: ${{ steps.secret_check.outputs.secret_status }}\nRun ID: ${{ github.run_id }}",
+              "alert_type": "${{ steps.secret_check.outputs.secret_status == 'exists' ? 'info' : 'error' }}",
+              "priority": "normal",
+              "tags": ["workflow:${{ github.workflow }}", "status:${{ steps.secret_check.outputs.secret_status }}"]
+            }
