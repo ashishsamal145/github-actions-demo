@@ -37,7 +37,7 @@ jobs:
       
       # Datadog monitoring step
       - name: Send metrics to Datadog
-        uses: DataDog/datadog-ci@v2
+        uses: datadog/action-datadog-ci@v1
         with:
           api-key: ${{ secrets.DATADOG_API_KEY }}
           service: github-actions
@@ -47,7 +47,7 @@ jobs:
 
       # Send event for monitoring
       - name: Send Datadog Event
-        uses: DataDog/datadog-ci@v2
+        uses: datadog/action-datadog-ci@v1
         with:
           api-key: ${{ secrets.DATADOG_API_KEY }}
           event: |
