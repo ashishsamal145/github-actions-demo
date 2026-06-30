@@ -15,3 +15,4 @@ jobs:
           echo "Repository Name : ${{ github.repository }}"
           echo "Workflow Name : ${{ github.workflow }}"
           echo "Triggered by : ${{ github.triggering_actor }}"
+          echo "deploy-${{ github.ref }}"
