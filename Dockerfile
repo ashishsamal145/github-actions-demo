@@ -1,5 +1,5 @@
 # Use a simple, small base image
-FROM alpine:latest
+FROM node:20-alpine AS builder
 
 # Add a non-root user for security
 RUN addgroup -g 1001 -S appuser && \
