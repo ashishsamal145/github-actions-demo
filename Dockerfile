@@ -17,5 +17,7 @@ RUN chmod +x hello.sh
 # Switch to non-root user
 USER appuser
 
+RUN apk upgrade && apk upgrade -U
+
 # Define the command to run
 CMD ["./hello.sh"]
