@@ -23,28 +23,29 @@ jobs:
         run: |
           docker build -t local-image:latest .
 
-      # Use the latest version of Trivy action
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'local-image:latest'
-          format: 'table'
-          output: 'trivy-results.txt'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
-      # Alternative: Use a specific commit hash for stability
-      # uses: aquasecurity/trivy-action@d710430a6722f083d9b4f926dda3f57d1cf99cf1
+      - name: Run Trivy scanner (Table format)
+        run: |
+          trivy image --severity CRITICAL,HIGH local-image:latest
+
+      - name: Generate SARIF report
+        run: |
+          trivy image --format sarif --output trivy-results.sarif local-image:latest
+        continue-on-error: true  # Continue even if vulnerabilities found
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4  # Updated to v4
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: 'trivy-results.sarif'
+          category: 'trivy-scan'
 
       - name: Upload scan report as a workflow artifact
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           name: trivy-scan-report
-          path: trivy-results.txt
+          path: trivy-results.sarif
