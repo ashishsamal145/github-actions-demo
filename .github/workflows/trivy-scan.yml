@@ -5,7 +5,6 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 jobs:
@@ -14,33 +13,32 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write # Required to upload SARIF results to the GitHub Security tab
+      security-events: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # --- 1. Build your Docker image ---
       - name: Build Docker image
         run: |
           docker build -t local-image:latest .
 
-      # --- 2. Scan the built image with Trivy ---
+      # Use the latest version of Trivy action
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'local-image:latest'
-          format: 'table' # Human-readable format for the log
+          format: 'table'
           output: 'trivy-results.txt'
-          exit-code: '1' # Fail the workflow if vulnerabilities are found
-          severity: 'CRITICAL,HIGH' # Only treat CRITICAL and HIGH as failures
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+      # Alternative: Use a specific commit hash for stability
+      # uses: aquasecurity/trivy-action@d710430a6722f083d9b4f926dda3f57d1cf99cf1
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
-        if: always() # Upload results even if the scan found vulnerabilities
+        if: always()
         with:
           sarif_file: 'trivy-results.sarif'
 
