@@ -1,7 +1,5 @@
 name: Scheduled Regression Tests with output in html
 
-name: Scheduled Regression Tests
-
 permissions:
   checks: write
   contents: read
