@@ -1,5 +1,9 @@
 name: Scheduled Regression Tests with output in html
 
+permissions:
+  checks: write
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -25,37 +29,93 @@ jobs:
         run: |
           Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
           
-          # Create results directory
           New-Item -ItemType Directory -Path ./TestResults -Force
           
-          # Run tests with multiple output formats
+          # Run tests and generate NUnit XML
           $config = New-PesterConfiguration
           $config.Run.Path = './health.Tests.ps1'
           $config.Output.Verbosity = 'Detailed'
-          
-          # Enable test result export
           $config.TestResult.Enabled = $true
           $config.TestResult.OutputFormat = 'NUnitXml'
           $config.TestResult.OutputPath = './TestResults/test-results.xml'
           
-          # Run tests
-          $results = Invoke-Pester -Configuration $config -PassThru
+          Invoke-Pester -Configuration $config
           
-          # Export summary
-          $summary = @"
-          Test Summary
-          ============
-          Total Tests: $($results.TotalCount)
-          Passed: $($results.PassedCount)
-          Failed: $($results.FailedCount)
-          Skipped: $($results.SkippedCount)
-          Duration: $($results.Duration)
+          # Run again with PassThru for results
+          $results = Invoke-Pester -Path './health.Tests.ps1' -PassThru
+          
+          # Generate detailed summary
+          $markdownSummary = @"
+          ## 📊 Test Results Summary
+          
+          | Metric | Value |
+          |--------|-------|
+          | Total Tests | $($results.TotalCount) |
+          | Passed | ✅ $($results.PassedCount) |
+          | Failed | ❌ $($results.FailedCount) |
+          | Skipped | ⏭️ $($results.SkippedCount) |
+          | Duration | $($results.Duration) |
+          
+          ---
+          
+          ## 📝 All Test Results
           "@
           
-          $summary | Out-File -FilePath ./TestResults/summary.txt
+          # List ALL tests with their status
+          $allTests = $results.Tests
+          $markdownSummary += "`n| Test Name | Status |`n|-----------|--------|`n"
           
-          # Set output for later steps
-          echo "tests_passed=$($results.FailedCount -eq 0)" >> $env:GITHUB_OUTPUT
+          foreach ($test in $allTests) {
+            $status = if ($test.Result -eq 'Passed') { '✅ Passed' } else { '❌ Failed' }
+            $testName = $test.Name
+            $markdownSummary += "| $testName | $status |`n"
+          }
+          
+          $markdownSummary += "`n---`n"
+          
+          # Add failed test details
+          $failedTests = $results.Failed
+          if ($failedTests.Count -gt 0) {
+            $markdownSummary += "`n## ❌ Failed Tests Details`n`n"
+            foreach ($test in $failedTests) {
+              $markdownSummary += @"
+          ### Test: $($test.Name)
+          - **Block**: $($test.Block)
+          - **Error**: `$($test.ErrorRecord.Exception.Message)`
+          - **Line**: $($test.ScriptBlock.StartPosition.Line)
+          
+          ---
+          
+          "@
+            }
+          } else {
+            $markdownSummary += "`n## ✅ All tests passed successfully!`n"
+          }
+          
+          $markdownSummary | Out-File -FilePath ./TestResults/summary.md -Encoding UTF8
+          
+          # Create text summary
+          $textSummary = "Test Results - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n"
+          $textSummary += "=" * 50 + "`n`n"
+          
+          foreach ($test in $allTests) {
+            $status = if ($test.Result -eq 'Passed') { 'PASSED' } else { 'FAILED' }
+            $textSummary += "$status - $($test.Name)`n"
+            if ($test.Result -ne 'Passed') {
+              $textSummary += "  Error: $($test.ErrorRecord.Exception.Message)`n"
+            }
+          }
+          $textSummary | Out-File -FilePath ./TestResults/test-details.txt -Encoding UTF8
+          
+          # Set output
+          if ($results.FailedCount -eq 0) {
+            echo "tests_passed=true" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "tests_passed=false" >> $env:GITHUB_OUTPUT
+          }
+          echo "test_count=$($results.TotalCount)" >> $env:GITHUB_OUTPUT
+          echo "failed_count=$($results.FailedCount)" >> $env:GITHUB_OUTPUT
+          echo "passed_count=$($results.PassedCount)" >> $env:GITHUB_OUTPUT
           
           Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         continue-on-error: true
@@ -69,24 +129,104 @@ jobs:
             ./TestResults/
           retention-days: 30
 
-      - name: Publish Test Results to Summary
+      # ===== CRITICAL: This step adds the test details to the workflow summary =====
+      - name: Add detailed test summary to workflow run
         if: always()
         shell: pwsh
         run: |
-          if (Test-Path ./TestResults/summary.txt) {
-            Get-Content ./TestResults/summary.txt
-            Get-Content ./TestResults/summary.txt >> $env:GITHUB_STEP_SUMMARY
+          Write-Host "## 📊 Detailed Test Results" >> $env:GITHUB_STEP_SUMMARY
+          Write-Host "=========================" >> $env:GITHUB_STEP_SUMMARY
+          
+          if (Test-Path ./TestResults/summary.md) {
+            Get-Content ./TestResults/summary.md >> $env:GITHUB_STEP_SUMMARY
+          }
+          
+          Write-Host "`n## 📋 Console Output" >> $env:GITHUB_STEP_SUMMARY
+          Write-Host "====================" >> $env:GITHUB_STEP_SUMMARY
+          Write-Host '```' >> $env:GITHUB_STEP_SUMMARY
+          if (Test-Path ./TestResults/test-details.txt) {
+            Get-Content ./TestResults/test-details.txt >> $env:GITHUB_STEP_SUMMARY
+          }
+          Write-Host '```' >> $env:GITHUB_STEP_SUMMARY
+
+      # ===== CRITICAL: This step prints details to the console =====
+      - name: Display detailed test results in console
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+          Write-Host "║              📊 DETAILED TEST RESULTS                    ║" -ForegroundColor Cyan
+          Write-Host "╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+          Write-Host ""
+          
+          if (Test-Path ./TestResults/test-details.txt) {
+            $content = Get-Content ./TestResults/test-details.txt
+            foreach ($line in $content) {
+              if ($line -match "PASSED") {
+                Write-Host $line -ForegroundColor Green
+              } elseif ($line -match "FAILED") {
+                Write-Host $line -ForegroundColor Red
+              } elseif ($line -match "Error:") {
+                Write-Host $line -ForegroundColor Yellow
+              } else {
+                Write-Host $line
+              }
+            }
+          }
+          
+          Write-Host ""
+          Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+          Write-Host "║  📁 Artifacts available in 'test-results' folder         ║" -ForegroundColor Cyan
+          Write-Host "╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+
+      # ===== This shows individual test results in the GitHub UI =====
+      - name: Show test results as annotations
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path ./TestResults/test-results.xml) {
+            [xml]$xml = Get-Content ./TestResults/test-results.xml
+            $tests = $xml.'test-results'.'test-suite'.'results'.'test-case'
+            
+            $passedCount = 0
+            $failedCount = 0
+            
+            foreach ($test in $tests) {
+              $status = $test.result
+              $name = $test.name
+              
+              if ($status -eq 'Success') {
+                $passedCount++
+                Write-Host "✅ $name" -ForegroundColor Green
+              } else {
+                $failedCount++
+                $errorMsg = ""
+                if ($test.failure) {
+                  $errorMsg = $test.failure.message
+                }
+                Write-Host "❌ $name" -ForegroundColor Red
+                Write-Host "   Error: $errorMsg" -ForegroundColor Yellow
+                
+                # Create GitHub annotation for failed tests
+                Write-Host "::error title=Test Failed::$name - $errorMsg"
+              }
+            }
+            
+            Write-Host ""
+            Write-Host "Summary: $passedCount passed, $failedCount failed" -ForegroundColor Cyan
           }
 
-      - name: Publish NUnit Test Report
+      - name: Publish Test Report
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
           files: |
             ./TestResults/test-results.xml
           check_name: Pester Test Results
-          comment_mode: off
+          comment_mode: always
           report_individual_runs: true
+          check_run_annotations: all tests
 
       - name: Fail workflow if tests failed
         if: steps.pester-tests.outputs.tests_passed == 'false'
