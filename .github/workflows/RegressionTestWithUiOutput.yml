@@ -43,28 +43,19 @@ jobs:
           $results = Invoke-Pester -Configuration $config
           
           # ===== GENERATE DETAILED UI OUTPUT =====
-          $detailedOutput = @"
-          # 📊 Pester Test Results - Detailed Report
-          
-          **Generated:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
-          
-          ---
-          
-          ## 📈 Summary
-          
-          | Metric | Value |
-          |--------|-------|
-          | Total Tests | $($results.TotalCount) |
-          | ✅ Passed | $($results.PassedCount) |
-          | ❌ Failed | $($results.FailedCount) |
-          | ⏭️ Skipped | $($results.SkippedCount) |
-          | ⏱️ Duration | $($results.Duration) |
-          
-          ---
-          
-          ## 📝 Detailed Test Results
-          
-          "@
+          $detailedOutput = "# 📊 Pester Test Results - Detailed Report`n`n"
+          $detailedOutput += "**Generated:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')`n`n"
+          $detailedOutput += "---`n`n"
+          $detailedOutput += "## 📈 Summary`n`n"
+          $detailedOutput += "| Metric | Value |`n"
+          $detailedOutput += "|--------|-------|`n"
+          $detailedOutput += "| Total Tests | $($results.TotalCount) |`n"
+          $detailedOutput += "| ✅ Passed | $($results.PassedCount) |`n"
+          $detailedOutput += "| ❌ Failed | $($results.FailedCount) |`n"
+          $detailedOutput += "| ⏭️ Skipped | $($results.SkippedCount) |`n"
+          $detailedOutput += "| ⏱️ Duration | $($results.Duration) |`n`n"
+          $detailedOutput += "---`n`n"
+          $detailedOutput += "## 📝 Detailed Test Results`n`n"
           
           # Process each test and format it nicely
           $testGroups = $results.Tests | Group-Object { $_.Block } -AsHashTable
@@ -112,22 +103,21 @@ jobs:
           }
           
           # ===== ADD FAILED TESTS DETAILS SECTION =====
+          $backtick = "``"
+          $fence = $backtick + $backtick + $backtick
           $failedTests = $results.Failed
           if ($failedTests.Count -gt 0) {
             $detailedOutput += "`n---`n"
             $detailedOutput += "## ❌ Failed Tests Details`n`n"
 
             foreach ($test in $failedTests) {
-              $detailedOutput += @"
-          ### $($test.Name)
-          - **Context:** $($test.Block)
-          - **Error:** $($test.ErrorRecord.Exception.Message)
-          - **Line:** $($test.ScriptBlock.StartPosition.Line)
-
-          ```powershell
-          $($test.ScriptBlock.ToString())
-          ```
-          "@
+              $detailedOutput += "### $($test.Name)`n"
+              $detailedOutput += "- **Context:** $($test.Block)`n"
+              $detailedOutput += "- **Error:** $($test.ErrorRecord.Exception.Message)`n"
+              $detailedOutput += "- **Line:** $($test.ScriptBlock.StartPosition.Line)`n`n"
+              $detailedOutput += "$fence" + "powershell`n"
+              $detailedOutput += "$($test.ScriptBlock.ToString())`n"
+              $detailedOutput += "$fence`n`n"
             }
           } else {
             $detailedOutput += "`n---`n"
@@ -138,12 +128,9 @@ jobs:
           $detailedOutput | Out-File -FilePath ./TestResults/detailed-report.md -Encoding UTF8
 
           # ===== CREATE CONSOLE OUTPUT VERSION =====
-          $consoleOutput = @"
-          ╔══════════════════════════════════════════════════════════════════╗
-          ║ 📊 PESTER TEST RESULTS ║
-          ╚══════════════════════════════════════════════════════════════════╝
-
-          "@
+          $consoleOutput = "╔══════════════════════════════════════════════════════════════════╗`n"
+          $consoleOutput += "║ 📊 PESTER TEST RESULTS ║`n"
+          $consoleOutput += "╚══════════════════════════════════════════════════════════════════╝`n`n"
 
           foreach ($blockName in $testGroups.Keys | Sort-Object) {
             $tests = $testGroups[$blockName]
