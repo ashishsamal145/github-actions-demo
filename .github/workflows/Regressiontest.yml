@@ -1,5 +1,9 @@
 name: Scheduled Regression Tests
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   schedule:
     # Runs every day at midnight UTC. Adjust the cron expression as needed.
