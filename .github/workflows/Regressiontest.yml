@@ -7,7 +7,7 @@ concurrency:
 on:
   schedule:
     # Runs every day at midnight UTC. Adjust the cron expression as needed.
-    - cron: '31 10 * * *'
+    - cron: '02 10 * * *'
   workflow_dispatch: # Allows you to trigger the test manually from GitHub UI
 
 jobs:
