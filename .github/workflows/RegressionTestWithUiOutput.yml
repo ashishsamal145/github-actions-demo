@@ -1,8 +1,9 @@
-name: Scheduled Regression Tests with UI output
+name: Scheduled Regression Tests in UI report output
 
 permissions:
   checks: write
   contents: read
+  pull-requests: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,7 +24,7 @@ jobs:
         with:
           ref: dev
 
-      - name: Run Pester tests
+      - name: Run Pester tests and generate detailed output
         shell: pwsh
         id: pester-tests
         run: |
@@ -31,134 +32,217 @@ jobs:
           
           New-Item -ItemType Directory -Path ./TestResults -Force
           
-          # Run tests and generate NUnit XML
+          # Run tests once, capturing both the detailed results object and the NUnit XML report
           $config = New-PesterConfiguration
           $config.Run.Path = './health.Tests.ps1'
+          $config.Run.PassThru = $true
           $config.Output.Verbosity = 'Detailed'
           $config.TestResult.Enabled = $true
           $config.TestResult.OutputFormat = 'NUnitXml'
           $config.TestResult.OutputPath = './TestResults/test-results.xml'
+          $results = Invoke-Pester -Configuration $config
           
-          Invoke-Pester -Configuration $config
+          # ===== GENERATE DETAILED UI OUTPUT =====
+          $detailedOutput = "# 📊 Pester Test Results - Detailed Report`n`n"
+          $detailedOutput += "**Generated:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')`n`n"
+          $detailedOutput += "---`n`n"
+          $detailedOutput += "## 📈 Summary`n`n"
+          $detailedOutput += "| Metric | Value |`n"
+          $detailedOutput += "|--------|-------|`n"
+          $detailedOutput += "| Total Tests | $($results.TotalCount) |`n"
+          $detailedOutput += "| ✅ Passed | $($results.PassedCount) |`n"
+          $detailedOutput += "| ❌ Failed | $($results.FailedCount) |`n"
+          $detailedOutput += "| ⏭️ Skipped | $($results.SkippedCount) |`n"
+          $detailedOutput += "| ⏱️ Duration | $($results.Duration) |`n`n"
+          $detailedOutput += "---`n`n"
+          $detailedOutput += "## 📝 Detailed Test Results`n`n"
           
-          $results = Invoke-Pester -Path './health.Tests.ps1' -PassThru
+          # Process each test and format it nicely
+          $testGroups = $results.Tests | Group-Object { $_.Block } -AsHashTable
           
-          # Create HTML Report
-          $html = @"
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <style>
-                  body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-                  .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                  h1 { color: #333; border-bottom: 2px solid #0366d6; padding-bottom: 10px; }
-                  .summary { display: flex; gap: 20px; margin: 20px 0; flex-wrap: wrap; }
-                  .card { padding: 15px 25px; border-radius: 8px; color: white; flex: 1; min-width: 120px; }
-                  .total { background: #0366d6; }
-                  .passed { background: #28a745; }
-                  .failed { background: #dc3545; }
-                  .duration { background: #6f42c1; }
-                  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                  th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-                  th { background-color: #f8f9fa; font-weight: bold; }
-                  .pass { color: #28a745; font-weight: bold; }
-                  .fail { color: #dc3545; font-weight: bold; }
-                  .test-details { margin-top: 20px; }
-                  .error { background: #fff5f5; padding: 10px; border-left: 4px solid #dc3545; margin: 5px 0; font-family: monospace; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <h1>📊 Pester Test Results</h1>
-                  <p><strong>Generated:</strong> $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')</p>
-                  
-                  <div class="summary">
-                      <div class="card total">📊 Total: $($results.TotalCount)</div>
-                      <div class="card passed">✅ Passed: $($results.PassedCount)</div>
-                      <div class="card failed">❌ Failed: $($results.FailedCount)</div>
-                      <div class="card duration">⏱️ Duration: $($results.Duration)</div>
-                  </div>
-                  
-                  <h2>📝 Test Results</h2>
-                  <table>
-                      <thead>
-                          <tr>
-                              <th>Test Name</th>
-                              <th>Status</th>
-                              <th>Duration</th>
-                              <th>Error</th>
-                          </tr>
-                      </thead>
-                      <tbody>
-          "@
-          
-          foreach ($test in $results.Tests) {
-              $statusClass = if ($test.Result -eq 'Passed') { 'pass' } else { 'fail' }
-              $statusText = if ($test.Result -eq 'Passed') { '✅ PASSED' } else { '❌ FAILED' }
-              $errorMsg = if ($test.Result -ne 'Passed') { $test.ErrorRecord.Exception.Message -replace "'", "&apos;" } else { '' }
+          foreach ($blockName in $testGroups.Keys | Sort-Object) {
+            $tests = $testGroups[$blockName]
+            
+            $failedCount = ($tests | Where-Object { $_.Result -ne 'Passed' }).Count
+            $totalCount = $tests.Count
+            $statusIcon = if ($failedCount -eq 0) { '✅' } else { '❌' }
+            
+            $detailedOutput += "`n### $statusIcon Context $blockName`n`n"
+            
+            foreach ($test in $tests) {
+              $testName = $test.Name
+              $result = $test.Result
+              $duration = $test.Duration
+              $icon = if ($result -eq 'Passed') { '[+]' } else { '[-]' }
               
-              $html += @"
-                          <tr>
-                              <td><strong>$($test.Name)</strong></td>
-                              <td class="$statusClass">$statusText</td>
-                              <td>$($test.Duration)</td>
-                              <td>$errorMsg</td>
-                          </tr>
-          "@
+              # Format duration
+              $durationStr = if ($duration.TotalMilliseconds -gt 1000) {
+                "{0:F2}s" -f $duration.TotalSeconds
+              } else {
+                "{0}ms" -f $duration.TotalMilliseconds
+              }
+              
+              $detailedOutput += "- $icon **$testName** "
+              
+              if ($result -eq 'Passed') {
+                $detailedOutput += "✅ $durationStr`n"
+              } else {
+                $detailedOutput += "❌ FAILED`n"
+                if ($test.ErrorRecord) {
+                  $errorMsg = $test.ErrorRecord.Exception.Message -replace "`n", "`n  "
+                  $detailedOutput += "  - Error: $errorMsg`n"
+                }
+                if ($test.Stacktrace) {
+                  $detailedOutput += "  - Stack: $($test.Stacktrace)`n"
+                }
+              }
+            }
+            
+            # Add summary for this context
+            $detailedOutput += "`n_Context Summary: $($tests.Count) tests, $($failedCount) failed_`n"
           }
           
-          $html += @"
-                      </tbody>
-                  </table>
-                  
-                  <div class="test-details">
-                      <h2>❌ Failed Tests Details</h2>
-          "@
-          
+          # ===== ADD FAILED TESTS DETAILS SECTION =====
+          $backtick = "``"
+          $fence = $backtick + $backtick + $backtick
           $failedTests = $results.Failed
           if ($failedTests.Count -gt 0) {
-              foreach ($test in $failedTests) {
-                  $html += @"
-                      <div class="error">
-                          <strong>$($test.Name)</strong><br>
-                          <strong>Block:</strong> $($test.Block)<br>
-                          <strong>Error:</strong> $($test.ErrorRecord.Exception.Message)<br>
-                          <strong>Line:</strong> $($test.ScriptBlock.StartPosition.Line)
-                      </div>
-          "@
-              }
+            $detailedOutput += "`n---`n"
+            $detailedOutput += "## ❌ Failed Tests Details`n`n"
+
+            foreach ($test in $failedTests) {
+              $detailedOutput += "### $($test.Name)`n"
+              $detailedOutput += "- **Context:** $($test.Block)`n"
+              $detailedOutput += "- **Error:** $($test.ErrorRecord.Exception.Message)`n"
+              $detailedOutput += "- **Line:** $($test.ScriptBlock.StartPosition.Line)`n`n"
+              $detailedOutput += "$fence" + "powershell`n"
+              $detailedOutput += "$($test.ScriptBlock.ToString())`n"
+              $detailedOutput += "$fence`n`n"
+            }
           } else {
-              $html += "<p style='color: green; font-size: 18px;'>🎉 All tests passed successfully!</p>"
+            $detailedOutput += "`n---`n"
+            $detailedOutput += "## ✅ All tests passed successfully! 🎉`n"
           }
-          
-          $html += @"
-                  </div>
-              </div>
-          </body>
-          </html>
-          "@
-          
-          $html | Out-File -FilePath ./TestResults/report.html -Encoding UTF8
-          
-          # Set output
+
+          # Save the detailed report to file
+          $detailedOutput | Out-File -FilePath ./TestResults/detailed-report.md -Encoding UTF8
+
+          # ===== CREATE CONSOLE OUTPUT VERSION =====
+          $consoleOutput = "╔══════════════════════════════════════════════════════════════════╗`n"
+          $consoleOutput += "║ 📊 PESTER TEST RESULTS ║`n"
+          $consoleOutput += "╚══════════════════════════════════════════════════════════════════╝`n`n"
+
+          foreach ($blockName in $testGroups.Keys | Sort-Object) {
+            $tests = $testGroups[$blockName]
+            $consoleOutput += "┌─ $blockName`n"
+
+            foreach ($test in $tests) {
+              $result = $test.Result
+              $icon = if ($result -eq 'Passed') { '✓' } else { '✗' }
+              $colorLabel = if ($result -eq 'Passed') { 'PASSED' } else { 'FAILED' }
+              $duration = $test.Duration
+              $durationStr = if ($duration.TotalMilliseconds -gt 1000) {
+                "{0:F2}s" -f $duration.TotalSeconds
+              } else {
+                "{0}ms" -f $duration.TotalMilliseconds
+              }
+
+              $consoleOutput += "  $icon $($test.Name) - $colorLabel ($durationStr)`n"
+
+              if ($result -ne 'Passed') {
+                $consoleOutput += "    Error: $($test.ErrorRecord.Exception.Message)`n"
+              }
+            }
+            $consoleOutput += "`n"
+          }
+
+          # Add failed tests summary to console output
+          $failedTests = $results.Failed
+          if ($failedTests.Count -gt 0) {
+            $consoleOutput += "`n" + "=" * 60 + "`n"
+            $consoleOutput += "❌ FAILED TESTS SUMMARY`n"
+            $consoleOutput += "=" * 60 + "`n"
+            foreach ($test in $failedTests) {
+              $consoleOutput += "• $($test.Name)`n"
+              $consoleOutput += "  Error: $($test.ErrorRecord.Exception.Message)`n"
+              $consoleOutput += "  Line: $($test.ScriptBlock.StartPosition.Line)`n`n"
+            }
+          } else {
+            $consoleOutput += "`n" + "=" * 60 + "`n"
+            $consoleOutput += "✅ ALL TESTS PASSED! 🎉`n"
+            $consoleOutput += "=" * 60 + "`n"
+          }
+
+          $consoleOutput | Out-File -FilePath ./TestResults/console-output.txt -Encoding UTF8
+
+          # ===== SET OUTPUTS FOR WORKFLOW =====
           if ($results.FailedCount -eq 0) {
             echo "tests_passed=true" >> $env:GITHUB_OUTPUT
           } else {
             echo "tests_passed=false" >> $env:GITHUB_OUTPUT
           }
-          
-          Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+          echo "test_count=$($results.TotalCount)" >> $env:GITHUB_OUTPUT
+          echo "failed_count=$($results.FailedCount)" >> $env:GITHUB_OUTPUT
+          echo "passed_count=$($results.PassedCount)" >> $env:GITHUB_OUTPUT
+
+          # ===== DISPLAY RUN COMPLETION TIME =====
+          Write-Host "`n✅ Test execution completed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Green
+          Write-Host "📊 Total Tests: $($results.TotalCount)" -ForegroundColor Cyan
+          Write-Host "✅ Passed: $($results.PassedCount)" -ForegroundColor Green
+          Write-Host "❌ Failed: $($results.FailedCount)" -ForegroundColor Red
+          Write-Host "⏱️ Duration: $($results.Duration)`n" -ForegroundColor Yellow
         continue-on-error: true
 
-      - name: Upload HTML Report
-        uses: actions/upload-artifact@v4
+      # ===== DISPLAY DETAILED RESULTS IN UI =====
+      - name: 📊 Display Detailed Test Results in UI
         if: always()
-        with:
-          name: test-report
-          path: ./TestResults/report.html
-          retention-days: 30
+        shell: pwsh
+        run: |
+          if (Test-Path ./TestResults/detailed-report.md) {
+            Get-Content ./TestResults/detailed-report.md >> $env:GITHUB_STEP_SUMMARY
+          }
 
-      - name: Upload all test results
+          if (Test-Path ./TestResults/console-output.txt) {
+            "`n## 🖥️ Console Output`n" >> $env:GITHUB_STEP_SUMMARY
+            '```' >> $env:GITHUB_STEP_SUMMARY
+            Get-Content ./TestResults/console-output.txt >> $env:GITHUB_STEP_SUMMARY
+            '```' >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      # ===== DISPLAY COLOR-CODED CONSOLE OUTPUT =====
+      - name: 📋 Display Color-Coded Console Output
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "╔══════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+          Write-Host "║ 📊 PESTER TEST RESULTS ║" -ForegroundColor Cyan
+          Write-Host "╚══════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+          Write-Host ""
+
+          if (Test-Path ./TestResults/console-output.txt) {
+            $lines = Get-Content ./TestResults/console-output.txt
+            foreach ($line in $lines) {
+              if ($line -match "FAILED") {
+                Write-Host $line -ForegroundColor Red
+              } elseif ($line -match "PASSED") {
+                Write-Host $line -ForegroundColor Green
+              } elseif ($line -match "Error:") {
+                Write-Host $line -ForegroundColor Yellow
+              } elseif ($line -match "┌─") {
+                Write-Host $line -ForegroundColor Magenta
+              } elseif ($line -match "✓") {
+                Write-Host $line -ForegroundColor Green
+              } elseif ($line -match "✗") {
+                Write-Host $line -ForegroundColor Red
+              } else {
+                Write-Host $line
+              }
+            }
+          }
+
+      # ===== UPLOAD TEST ARTIFACTS =====
+      - name: Upload test artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -167,20 +251,7 @@ jobs:
             ./TestResults/
           retention-days: 30
 
-      # ===== This adds a link to the HTML report in the summary =====
-      - name: Add report link to summary
-        if: always()
-        shell: pwsh
-        run: |
-          $reportUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          @"
-          ## 📊 Test Report Available
-          
-          Click the **"test-report"** artifact below to download and view the detailed HTML report.
-          
-          [View HTML Report]($reportUrl#artifacts)
-          "@ >> $env:GITHUB_STEP_SUMMARY
-
+      # ===== PUBLISH TEST REPORT AS CHECK RUN =====
       - name: Publish Test Report (Check Run)
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
@@ -192,6 +263,7 @@ jobs:
           report_individual_runs: true
           check_run_annotations: all tests
 
+      # ===== FAIL WORKFLOW IF TESTS FAILED =====
       - name: Fail workflow if tests failed
-        if: steps.pester-tests.outputs.tests_passed == 'false'
+        if: steps.pester-tests.outputs.tests_passed == 'false' || steps.pester-tests.outcome == 'failure'
         run: exit 1
