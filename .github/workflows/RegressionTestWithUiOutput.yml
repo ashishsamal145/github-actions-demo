@@ -32,16 +32,15 @@ jobs:
           
           New-Item -ItemType Directory -Path ./TestResults -Force
           
-          # Run tests and capture detailed results
-          $results = Invoke-Pester -Path './health.Tests.ps1' -PassThru -Output Detailed
-          
-          # Generate NUnit XML for reporting
+          # Run tests once, capturing both the detailed results object and the NUnit XML report
           $config = New-PesterConfiguration
           $config.Run.Path = './health.Tests.ps1'
+          $config.Run.PassThru = $true
+          $config.Output.Verbosity = 'Detailed'
           $config.TestResult.Enabled = $true
           $config.TestResult.OutputFormat = 'NUnitXml'
           $config.TestResult.OutputPath = './TestResults/test-results.xml'
-          Invoke-Pester -Configuration $config
+          $results = Invoke-Pester -Configuration $config
           
           # ===== GENERATE DETAILED UI OUTPUT =====
           $detailedOutput = @"
@@ -272,7 +271,5 @@ jobs:
 
       # ===== FAIL WORKFLOW IF TESTS FAILED =====
       - name: Fail workflow if tests failed
-        if: steps.pester-tests.outputs.tests_passed == 'false'
+        if: steps.pester-tests.outputs.tests_passed == 'false' || steps.pester-tests.outcome == 'failure'
         run: exit 1
-
-          
