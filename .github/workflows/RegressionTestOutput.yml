@@ -31,7 +31,7 @@ jobs:
           
           New-Item -ItemType Directory -Path ./TestResults -Force
           
-          # Run tests and capture detailed results
+          # Configuration for test run (no -PassThru)
           $config = New-PesterConfiguration
           $config.Run.Path = './health.Tests.ps1'
           $config.Output.Verbosity = 'Detailed'
@@ -39,12 +39,15 @@ jobs:
           $config.TestResult.OutputFormat = 'NUnitXml'
           $config.TestResult.OutputPath = './TestResults/test-results.xml'
           
-          # Run tests and get results
-          $results = Invoke-Pester -Configuration $config -PassThru
+          # Run tests with configuration only
+          Invoke-Pester -Configuration $config
           
-          # Generate detailed summary in markdown
+          # Now run again with PassThru to get results (without Configuration)
+          $results = Invoke-Pester -Path './health.Tests.ps1' -PassThru
+          
+          # Generate detailed summary in markdown with ALL test details
           $markdownSummary = @"
-          ## Test Results
+          ## 📊 Test Results Summary
           
           | Metric | Value |
           |--------|-------|
@@ -54,26 +57,56 @@ jobs:
           | Skipped | ⏭️ $($results.SkippedCount) |
           | Duration | $($results.Duration) |
           
-          ### Failed Tests Details
+          ---
+          
+          ## 📝 All Test Results
           "@
+          
+          # List ALL tests with their status
+          $allTests = $results.Tests
+          $markdownSummary += "`n| Test Name | Status |`n|-----------|--------|`n"
+          
+          foreach ($test in $allTests) {
+            $status = if ($test.Result -eq 'Passed') { '✅ Passed' } else { '❌ Failed' }
+            $testName = $test.Name
+            $markdownSummary += "| $testName | $status |`n"
+          }
+          
+          $markdownSummary += "`n---`n"
           
           # Add failed test details
           $failedTests = $results.Failed
           if ($failedTests.Count -gt 0) {
-            $markdownSummary += "`n"
+            $markdownSummary += "`n## ❌ Failed Tests Details`n`n"
             foreach ($test in $failedTests) {
               $markdownSummary += @"
+          ### Test: $($test.Name)
+          - **Block**: $($test.Block)
+          - **Error**: `$($test.ErrorRecord.Exception.Message)`
+          - **Line**: $($test.ScriptBlock.StartPosition.Line)
           
-          **$($test.Block)** - `$($test.Name)`
-          - Error: `$($test.ErrorRecord.Exception.Message)`
-          - Line: $($test.ScriptBlock.StartPosition.Line)
+          ---
+          
           "@
             }
           } else {
-            $markdownSummary += "`n✅ All tests passed!"
+            $markdownSummary += "`n## ✅ All tests passed successfully!`n"
           }
           
-          $markdownSummary | Out-File -FilePath ./TestResults/summary.md
+          $markdownSummary | Out-File -FilePath ./TestResults/summary.md -Encoding UTF8
+          
+          # Create a simple text file with test names and status
+          $textSummary = "Test Results - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n"
+          $textSummary += "=" * 50 + "`n`n"
+          
+          foreach ($test in $allTests) {
+            $status = if ($test.Result -eq 'Passed') { 'PASSED' } else { 'FAILED' }
+            $textSummary += "$status - $($test.Name)`n"
+            if ($test.Result -ne 'Passed') {
+              $textSummary += "  Error: $($test.ErrorRecord.Exception.Message)`n"
+            }
+          }
+          $textSummary | Out-File -FilePath ./TestResults/test-details.txt -Encoding UTF8
           
           # Set output for later steps
           if ($results.FailedCount -eq 0) {
@@ -81,6 +114,9 @@ jobs:
           } else {
             echo "tests_passed=false" >> $env:GITHUB_OUTPUT
           }
+          echo "test_count=$($results.TotalCount)" >> $env:GITHUB_OUTPUT
+          echo "failed_count=$($results.FailedCount)" >> $env:GITHUB_OUTPUT
+          echo "passed_count=$($results.PassedCount)" >> $env:GITHUB_OUTPUT
           
           Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         continue-on-error: true
@@ -102,6 +138,20 @@ jobs:
             Get-Content ./TestResults/summary.md >> $env:GITHUB_STEP_SUMMARY
           }
 
+      - name: Display test results in console
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "## 📊 Test Results" -ForegroundColor Cyan
+          Write-Host "=" * 50 -ForegroundColor Cyan
+          
+          if (Test-Path ./TestResults/test-details.txt) {
+            Get-Content ./TestResults/test-details.txt
+          }
+          
+          Write-Host "=" * 50 -ForegroundColor Cyan
+          Write-Host "Artifacts available in the 'test-results' folder" -ForegroundColor Yellow
+
       - name: Publish Test Report
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
@@ -109,10 +159,10 @@ jobs:
           files: |
             ./TestResults/test-results.xml
           check_name: Pester Test Results
-          comment_mode: create  # Creates a comment on the commit
-          report_individual_runs: true  # Shows individual test results
-          # Remove or comment out the test_file_prefix parameter
-          # test_file_prefix: health.Tests.ps1  # REMOVED - this was causing the error
+          comment_mode: create
+          report_individual_runs: true
+          check_run_annotations: failure
+          check_run_annotations_branch: dev
 
       - name: Fail workflow if tests failed
         if: steps.pester-tests.outputs.tests_passed == 'false'
