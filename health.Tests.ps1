@@ -20,13 +20,15 @@ Describe "Endpoint Regression Tests" {
         }
 
         It "HTTP redirects to HTTPS (301)" {
+            # FIXED: Reverted back to your exact requested URL
             $response = Invoke-WebRequest -Uri "http://zenalyst.ai" -Method Get -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction SilentlyContinue
             $response.StatusCode | Should -Be 301
         }
     }
+
     Context "SSL Certificate Verification via OpenSSL" {
-        # Execute the pipeline directly via pwsh operators
-        $sslOutput = echo "" | & openssl s_client -servername purva.zenalyst.ai -connect 20.219.60.145:443 2>$null | & openssl x509 -noout -subject -dates
+        # FIXED: Wrapped in bash -c so the Linux pipeline pipes correctly without returning $null to Pester
+        $sslOutput = bash -c 'echo | openssl s_client -servername purva.zenalyst.ai -connect 20.219.60.145:443 2>/dev/null | openssl x509 -noout -subject -dates'
 
         It "Successfully retrieved OpenSSL data" {
             $sslOutput | Should -Not -BeNullOrEmpty
@@ -40,7 +42,6 @@ Describe "Endpoint Regression Tests" {
             $notBeforeLine = $sslOutput | Where-Object { $_ -match "^notBefore=" }
             $notBeforeStr = ($notBeforeLine -replace "notBefore=", "").Trim()
             
-            # Formats to safely catch both single-digit days ("Jun  2") and double-digit days ("Jun 24")
             $formats = @("MMM dd HH:mm:ss yyyy 'GMT'", "MMM  d HH:mm:ss yyyy 'GMT'")
             $notBeforeDate = [DateTime]::ParseExact($notBeforeStr, $formats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
             
@@ -64,7 +65,6 @@ Describe "Endpoint Regression Tests" {
             $formats = @("MMM dd HH:mm:ss yyyy 'GMT'", "MMM  d HH:mm:ss yyyy 'GMT'")
             $notAfterDate = [DateTime]::ParseExact($notAfterStr, $formats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
             
-            # Safeguard threshold check
             $minimumSafeDate = (Get-Date).AddDays(14)
             $notAfterDate | Should -BeGreaterThan $minimumSafeDate
         }
