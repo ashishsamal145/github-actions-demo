@@ -1,0 +1,93 @@
+name: Scheduled Regression Tests with output in html
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  schedule:
+    - cron: '40 10 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-pester:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout dev branch
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Run Pester tests with detailed results
+        shell: pwsh
+        id: pester-tests
+        run: |
+          Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
+          
+          # Create results directory
+          New-Item -ItemType Directory -Path ./TestResults -Force
+          
+          # Run tests with multiple output formats
+          $config = New-PesterConfiguration
+          $config.Run.Path = './health.Tests.ps1'
+          $config.Output.Verbosity = 'Detailed'
+          
+          # Enable test result export
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputFormat = 'NUnitXml'
+          $config.TestResult.OutputPath = './TestResults/test-results.xml'
+          
+          # Run tests
+          $results = Invoke-Pester -Configuration $config -PassThru
+          
+          # Export summary
+          $summary = @"
+          Test Summary
+          ============
+          Total Tests: $($results.TotalCount)
+          Passed: $($results.PassedCount)
+          Failed: $($results.FailedCount)
+          Skipped: $($results.SkippedCount)
+          Duration: $($results.Duration)
+          "@
+          
+          $summary | Out-File -FilePath ./TestResults/summary.txt
+          
+          # Set output for later steps
+          echo "tests_passed=$($results.FailedCount -eq 0)" >> $env:GITHUB_OUTPUT
+          
+          Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        continue-on-error: true
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ github.run_id }}
+          path: |
+            ./TestResults/
+          retention-days: 30
+
+      - name: Publish Test Results to Summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path ./TestResults/summary.txt) {
+            Get-Content ./TestResults/summary.txt
+            Get-Content ./TestResults/summary.txt >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Publish NUnit Test Report
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: |
+            ./TestResults/test-results.xml
+          check_name: Pester Test Results
+          comment_mode: off
+          report_individual_runs: true
+
+      - name: Fail workflow if tests failed
+        if: steps.pester-tests.outputs.tests_passed == 'false'
+        run: exit 1
