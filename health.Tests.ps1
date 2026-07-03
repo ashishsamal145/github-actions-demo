@@ -28,7 +28,7 @@ Describe "Endpoint Regression Tests" {
     Context "SSL Certificate Verification via OpenSSL" {
         # FIX: Using [System.Environment]::NewLine creates a valid native pipeline stream for OpenSSL in pwsh
         $sslOutput = [System.Environment]::NewLine | & openssl s_client -servername purva.zenalyst.ai -connect 20.219.60.145:443 2>$null | & openssl x509 -noout -subject -dates
-
+        Write-Host "$sslOutput"
         It "Successfully retrieved OpenSSL data" {
             $sslOutput | Should -Not -BeNullOrEmpty
         }
