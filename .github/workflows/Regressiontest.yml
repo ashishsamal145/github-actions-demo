@@ -7,15 +7,17 @@ concurrency:
 on:
   schedule:
     # Runs every day at midnight UTC. Adjust the cron expression as needed.
-    - cron: '04 11 * * *'
+    - cron: '12 10 * * *'
   workflow_dispatch: # Allows you to trigger the test manually from GitHub UI
 
 jobs:
   run-pester:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout dev branch
         uses: actions/checkout@v4
+        with:
+          ref: dev
 
       - name: Run Pester tests
         shell: pwsh
