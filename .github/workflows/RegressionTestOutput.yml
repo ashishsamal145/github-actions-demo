@@ -159,10 +159,10 @@ jobs:
           files: |
             ./TestResults/test-results.xml
           check_name: Pester Test Results
-          comment_mode: always  # Valid options: off, always, changes, "changes in failures", "changes in errors", failures, errors
+          comment_mode: always
           report_individual_runs: true
-          check_run_annotations: failure
-          check_run_annotations_branch: dev
+          check_run_annotations: all tests  # Changed from 'failure' to 'all tests'
+          # check_run_annotations_branch: dev  # This parameter doesn't exist, removing it
 
       - name: Fail workflow if tests failed
         if: steps.pester-tests.outputs.tests_passed == 'false'
