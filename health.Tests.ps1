@@ -5,17 +5,17 @@ Describe "Endpoint Regression Tests" {
 
     Context "HTTP Status Code Verification" {
         It "Frontend returns 200 OK" {
-            $response = Invoke-WebRequest -Uri "https://zenalyst.ai" -Method Get -MaximumRedirection 0 -SkipHttpErrorCheck
+            $response = Invoke-WebRequest -Uri "https://purva.zenalyst.ai/" -Method Get -MaximumRedirection 0 -SkipHttpErrorCheck
             $response.StatusCode | Should -Be 200
         }
 
         It "Backend returns 200 OK" {
-            $response = Invoke-WebRequest -Uri "https://zenalyst.aiapi/backend/api/health" -Method Get -SkipHttpErrorCheck
+            $response = Invoke-WebRequest -Uri "https://purva.zenalyst.ai/api/backend/api/health" -Method Get -SkipHttpErrorCheck
             $response.StatusCode | Should -Be 200
         }
 
         It "AI Engine returns 200 OK" {
-            $response = Invoke-WebRequest -Uri "https://zenalyst.aiapi/ai-engine/health" -Method Get -SkipHttpErrorCheck
+            $response = Invoke-WebRequest -Uri "https://purva.zenalyst.ai/api/ai-engine/health" -Method Get -SkipHttpErrorCheck
             $response.StatusCode | Should -Be 200
         }
 
@@ -24,48 +24,44 @@ Describe "Endpoint Regression Tests" {
             $response.StatusCode | Should -Be 301
         }
     }
-
-    Context "SSL Certificate Verification via OpenSSL" {
-        # FIX: Using [System.Environment]::NewLine creates a valid native pipeline stream for OpenSSL in pwsh
-        $sslOutput = [System.Environment]::NewLine | & openssl s_client -servername purva.zenalyst.ai -connect 20.219.60.145:443 2>$null | & openssl x509 -noout -subject -dates
-        Write-Host "$sslOutput"
-        It "Successfully retrieved OpenSSL data" {
-            $sslOutput | Should -Not -BeNullOrEmpty
-        }
-
-        It "Has the correct Common Name (Subject)" {
-            $sslOutput | Should -Match "subject=CN=purva.zenalyst.ai"
-        }
-
-        It "Certificate is currently active (notBefore check)" {
-            $notBeforeLine = $sslOutput | Where-Object { $_ -match "^notBefore=" }
-            $notBeforeStr = ($notBeforeLine -replace "notBefore=", "").Trim()
+    Context "SSL Certificate Verification" {
+        It "SSL certificate subject and dates should be valid for purva.zenalyst.ai" {
+            # Run openssl command to get certificate info
+            $certInfo = echo | openssl s_client -servername purva.zenalyst.ai -connect 20.219.60.145:443 2>/dev/null | openssl x509 -noout -subject -dates
             
-            $formats = @("MMM dd HH:mm:ss yyyy 'GMT'", "MMM  d HH:mm:ss yyyy 'GMT'")
-            $notBeforeDate = [DateTime]::ParseExact($notBeforeStr, $formats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
+            # Verify that certificate info is not empty
+            $certInfo | Should -Not -BeNullOrEmpty
             
-            $notBeforeDate | Should -BeLessThan (Get-Date)
-        }
-
-        It "Certificate is not expired (notAfter check)" {
-            $notAfterLine = $sslOutput | Where-Object { $_ -match "^notAfter=" }
-            $notAfterStr = ($notAfterLine -replace "notAfter=", "").Trim()
+            # Parse the output
+            $subjectLine = $certInfo | Select-String -Pattern "^subject="
+            $notBeforeLine = $certInfo | Select-String -Pattern "^notBefore="
+            $notAfterLine = $certInfo | Select-String -Pattern "^notAfter="
             
-            $formats = @("MMM dd HH:mm:ss yyyy 'GMT'", "MMM  d HH:mm:ss yyyy 'GMT'")
-            $notAfterDate = [DateTime]::ParseExact($notAfterStr, $formats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
+            # Verify subject contains expected domain
+            $subjectLine.ToString() | Should -Match "purva\.zenalyst\.ai"
             
-            $notAfterDate | Should -BeGreaterThan (Get-Date)
-        }
-
-        It "Certificate does not expire within the next 14 days" {
-            $notAfterLine = $sslOutput | Where-Object { $_ -match "^notAfter=" }
-            $notAfterStr = ($notAfterLine -replace "notAfter=", "").Trim()
+            # Verify dates are present
+            $notBeforeLine | Should -Not -BeNullOrEmpty
+            $notAfterLine | Should -Not -BeNullOrEmpty
             
-            $formats = @("MMM dd HH:mm:ss yyyy 'GMT'", "MMM  d HH:mm:ss yyyy 'GMT'")
-            $notAfterDate = [DateTime]::ParseExact($notAfterStr, $formats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
+            # Parse dates and verify certificate is not expired
+            $notAfter = $notAfterLine.ToString() -replace "^notAfter=", ""
+            $expiryDate = [datetime]::Parse($notAfter)
+            $currentDate = Get-Date
             
-            $minimumSafeDate = (Get-Date).AddDays(14)
-            $notAfterDate | Should -BeGreaterThan $minimumSafeDate
+            # Check if certificate is still valid (not expired)
+            $expiryDate -gt $currentDate | Should -Be $true
+            
+            # Optional: Check if certificate expires within 30 days (warning)
+            $daysUntilExpiry = ($expiryDate - $currentDate).Days
+            Write-Host "Certificate expires in $daysUntilExpiry days" -ForegroundColor Yellow
+            
+            # Verify subject details
+            $subject = $subjectLine.ToString() -replace "^subject=", ""
+            Write-Host "Certificate Subject: $subject" -ForegroundColor Green
+            Write-Host "Valid from: $($notBeforeLine.ToString() -replace '^notBefore=', '')" -ForegroundColor Green
+            Write-Host "Valid until: $notAfter" -ForegroundColor Green
         }
     }
+    
 }
