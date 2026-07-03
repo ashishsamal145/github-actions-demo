@@ -1,5 +1,10 @@
 name: Scheduled Regression Tests with output in html
 
+
+permissions:
+  checks: write
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -25,37 +30,86 @@ jobs:
         run: |
           Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
           
-          # Create results directory
           New-Item -ItemType Directory -Path ./TestResults -Force
           
-          # Run tests with multiple output formats
+          # Run tests and capture detailed results
           $config = New-PesterConfiguration
           $config.Run.Path = './health.Tests.ps1'
           $config.Output.Verbosity = 'Detailed'
-          
-          # Enable test result export
+          $config.Output.WriteDebugMessages = $true
+          $config.Output.WriteDebugMessagesFrom = 'Warning'
           $config.TestResult.Enabled = $true
           $config.TestResult.OutputFormat = 'NUnitXml'
           $config.TestResult.OutputPath = './TestResults/test-results.xml'
           
-          # Run tests
+          # Run tests and get results
           $results = Invoke-Pester -Configuration $config -PassThru
           
-          # Export summary
-          $summary = @"
-          Test Summary
-          ============
+          # Generate detailed summary
+          $detailedSummary = @"
+          ## Test Results Summary
+          ---------------------
           Total Tests: $($results.TotalCount)
           Passed: $($results.PassedCount)
           Failed: $($results.FailedCount)
           Skipped: $($results.SkippedCount)
           Duration: $($results.Duration)
+          
+          ## Failed Tests
           "@
           
-          $summary | Out-File -FilePath ./TestResults/summary.txt
+          # Add failed test details
+          $failedTests = $results.Failed
+          if ($failedTests.Count -gt 0) {
+            $detailedSummary += "`n"
+            foreach ($test in $failedTests) {
+              $detailedSummary += @"
+          Test: $($test.Block)-$($test.Name)
+          Error: $($test.ErrorRecord.Exception.Message)
+          --------------------
+          "@
+            }
+          } else {
+            $detailedSummary += "`nNo failed tests!"
+          }
           
-          # Set output for later steps
-          echo "tests_passed=$($results.FailedCount -eq 0)" >> $env:GITHUB_OUTPUT
+          $detailedSummary | Out-File -FilePath ./TestResults/detailed-summary.txt
+          
+          # Also create a markdown version for GitHub
+          $markdownSummary = @"
+          ### Test Results
+          
+          | Metric | Value |
+          |--------|-------|
+          | Total Tests | $($results.TotalCount) |
+          | Passed | ✅ $($results.PassedCount) |
+          | Failed | ❌ $($results.FailedCount) |
+          | Skipped | ⏭️ $($results.SkippedCount) |
+          | Duration | $($results.Duration) |
+          
+          #### Failed Tests Details
+          "@
+          
+          if ($failedTests.Count -gt 0) {
+            $markdownSummary += "`n"
+            foreach ($test in $failedTests) {
+              $markdownSummary += @"
+          - **$($test.Block)** - `$($test.Name)`
+            - Error: `$($test.ErrorRecord.Exception.Message)`
+          "@
+            }
+          } else {
+            $markdownSummary += "`n✅ All tests passed!"
+          }
+          
+          $markdownSummary | Out-File -FilePath ./TestResults/summary.md
+          
+          # Set output
+          if ($results.FailedCount -eq 0) {
+            echo "tests_passed=true" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "tests_passed=false" >> $env:GITHUB_OUTPUT
+          }
           
           Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         continue-on-error: true
@@ -69,25 +123,26 @@ jobs:
             ./TestResults/
           retention-days: 30
 
-      - name: Publish Test Results to Summary
+      - name: Add test summary to workflow run
         if: always()
         shell: pwsh
         run: |
-          if (Test-Path ./TestResults/summary.txt) {
-            Get-Content ./TestResults/summary.txt
-            Get-Content ./TestResults/summary.txt >> $env:GITHUB_STEP_SUMMARY
+          if (Test-Path ./TestResults/summary.md) {
+            Get-Content ./TestResults/summary.md >> $env:GITHUB_STEP_SUMMARY
           }
 
-      - name: Publish NUnit Test Report
+      - name: Publish Test Report with details
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
           files: |
             ./TestResults/test-results.xml
           check_name: Pester Test Results
-          comment_mode: off
-          report_individual_runs: true
-
+          comment_mode: create  # This creates a comment on the commit
+          report_individual_runs: true  # Shows individual test results
+          test_file_prefix: health.Tests.ps1
+          hide_comments: false  # Shows all details
+          
       - name: Fail workflow if tests failed
         if: steps.pester-tests.outputs.tests_passed == 'false'
         run: exit 1
