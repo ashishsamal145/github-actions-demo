@@ -1,0 +1,21 @@
+name: Scheduled Regression Tests
+
+on:
+  schedule:
+    # Runs every day at midnight UTC. Adjust the cron expression as needed.
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allows you to trigger the test manually from GitHub UI
+
+jobs:
+  run-pester:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          # Install Pester module if not present, then execute tests
+          Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
+          Invoke-Pester -Path ./health.Tests.ps1 -Output Detailed
