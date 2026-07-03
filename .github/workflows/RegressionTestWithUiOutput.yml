@@ -202,6 +202,13 @@ jobs:
             Get-Content ./TestResults/detailed-report.md >> $env:GITHUB_STEP_SUMMARY
           }
 
+          if (Test-Path ./TestResults/console-output.txt) {
+            "`n## 🖥️ Console Output`n" >> $env:GITHUB_STEP_SUMMARY
+            '```' >> $env:GITHUB_STEP_SUMMARY
+            Get-Content ./TestResults/console-output.txt >> $env:GITHUB_STEP_SUMMARY
+            '```' >> $env:GITHUB_STEP_SUMMARY
+          }
+
       # ===== DISPLAY COLOR-CODED CONSOLE OUTPUT =====
       - name: 📋 Display Color-Coded Console Output
         if: always()
