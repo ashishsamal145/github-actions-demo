@@ -25,7 +25,7 @@ Describe "Endpoint Regression Tests" {
         }
     }
     Context "SSL Certificate Verification via OpenSSL" {
-        # Execute the exact OpenSSL command string natively through PowerShell's pipeline
+        # Execute the pipeline directly via pwsh operators
         $sslOutput = echo "" | & openssl s_client -servername purva.zenalyst.ai -connect 20.219.60.145:443 2>$null | & openssl x509 -noout -subject -dates
 
         It "Successfully retrieved OpenSSL data" {
@@ -33,26 +33,40 @@ Describe "Endpoint Regression Tests" {
         }
 
         It "Has the correct Common Name (Subject)" {
-            # Verifies that the correct domain subject is being presented by the target IP
-            $sslOutput | Should -Match "CN\s*=\s*purva.zenalyst.ai"
+            $sslOutput | Should -Match "subject=CN=purva.zenalyst.ai"
         }
 
         It "Certificate is currently active (notBefore check)" {
-            # Extracts the 'notBefore' date text string out of the multi-line OpenSSL array
-            $notBeforeLine = $sslOutput | Where-Object { $_ -match "notBefore=" }
-            $notBeforeStr = $notBeforeLine -replace "notBefore=", ""
-            $notBeforeDate = [DateTime]::ParseExact($notBeforeStr.Trim(), "MMM  d HH:mm:ss yyyy GMT", [System.Globalization.CultureInfo]::InvariantCulture)
+            $notBeforeLine = $sslOutput | Where-Object { $_ -match "^notBefore=" }
+            $notBeforeStr = ($notBeforeLine -replace "notBefore=", "").Trim()
+            
+            # Formats to safely catch both single-digit days ("Jun  2") and double-digit days ("Jun 24")
+            $formats = @("MMM dd HH:mm:ss yyyy 'GMT'", "MMM  d HH:mm:ss yyyy 'GMT'")
+            $notBeforeDate = [DateTime]::ParseExact($notBeforeStr, $formats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
             
             $notBeforeDate | Should -BeLessThan (Get-Date)
         }
 
         It "Certificate is not expired (notAfter check)" {
-            # Extracts the 'notAfter' expiration date text string 
-            $notAfterLine = $sslOutput | Where-Object { $_ -match "notAfter=" }
-            $notAfterStr = $notAfterLine -replace "notAfter=", ""
-            $notAfterDate = [DateTime]::ParseExact($notAfterStr.Trim(), "MMM  d HH:mm:ss yyyy GMT", [System.Globalization.CultureInfo]::InvariantCulture)
+            $notAfterLine = $sslOutput | Where-Object { $_ -match "^notAfter=" }
+            $notAfterStr = ($notAfterLine -replace "notAfter=", "").Trim()
+            
+            $formats = @("MMM dd HH:mm:ss yyyy 'GMT'", "MMM  d HH:mm:ss yyyy 'GMT'")
+            $notAfterDate = [DateTime]::ParseExact($notAfterStr, $formats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
             
             $notAfterDate | Should -BeGreaterThan (Get-Date)
+        }
+
+        It "Certificate does not expire within the next 14 days" {
+            $notAfterLine = $sslOutput | Where-Object { $_ -match "^notAfter=" }
+            $notAfterStr = ($notAfterLine -replace "notAfter=", "").Trim()
+            
+            $formats = @("MMM dd HH:mm:ss yyyy 'GMT'", "MMM  d HH:mm:ss yyyy 'GMT'")
+            $notAfterDate = [DateTime]::ParseExact($notAfterStr, $formats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
+            
+            # Safeguard threshold check
+            $minimumSafeDate = (Get-Date).AddDays(14)
+            $notAfterDate | Should -BeGreaterThan $minimumSafeDate
         }
     }
 }
