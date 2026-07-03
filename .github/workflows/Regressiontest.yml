@@ -2,7 +2,7 @@ name: Scheduled Regression Tests
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: flase
+  cancel-in-progress: false
 
 on:
   schedule:
