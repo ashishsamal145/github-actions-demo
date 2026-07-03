@@ -17,3 +17,4 @@ jobs:
           echo "Triggered by : ${{ github.triggering_actor }}"
           echo "deploy-${{ github.ref }}"
           echo "Owner - ${{ github.repository_owner }}"
+          echo "Actor - ${{ github.actor }}"
