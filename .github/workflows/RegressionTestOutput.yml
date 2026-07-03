@@ -1,5 +1,6 @@
 name: Scheduled Regression Tests with output in html
 
+
 permissions:
   checks: write
   contents: read
@@ -31,7 +32,7 @@ jobs:
           
           New-Item -ItemType Directory -Path ./TestResults -Force
           
-          # Configuration for test run (no -PassThru)
+          # Run tests and generate NUnit XML
           $config = New-PesterConfiguration
           $config.Run.Path = './health.Tests.ps1'
           $config.Output.Verbosity = 'Detailed'
@@ -39,13 +40,12 @@ jobs:
           $config.TestResult.OutputFormat = 'NUnitXml'
           $config.TestResult.OutputPath = './TestResults/test-results.xml'
           
-          # Run tests with configuration only
           Invoke-Pester -Configuration $config
           
-          # Now run again with PassThru to get results (without Configuration)
+          # Run again with PassThru for results
           $results = Invoke-Pester -Path './health.Tests.ps1' -PassThru
           
-          # Generate detailed summary in markdown with ALL test details
+          # Generate detailed summary
           $markdownSummary = @"
           ## 📊 Test Results Summary
           
@@ -95,7 +95,7 @@ jobs:
           
           $markdownSummary | Out-File -FilePath ./TestResults/summary.md -Encoding UTF8
           
-          # Create a simple text file with test names and status
+          # Create text summary
           $textSummary = "Test Results - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n"
           $textSummary += "=" * 50 + "`n`n"
           
@@ -108,7 +108,7 @@ jobs:
           }
           $textSummary | Out-File -FilePath ./TestResults/test-details.txt -Encoding UTF8
           
-          # Set output for later steps
+          # Set output
           if ($results.FailedCount -eq 0) {
             echo "tests_passed=true" >> $env:GITHUB_OUTPUT
           } else {
@@ -159,7 +159,7 @@ jobs:
           files: |
             ./TestResults/test-results.xml
           check_name: Pester Test Results
-          comment_mode: create
+          comment_mode: always  # Valid options: off, always, changes, "changes in failures", "changes in errors", failures, errors
           report_individual_runs: true
           check_run_annotations: failure
           check_run_annotations_branch: dev
