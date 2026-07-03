@@ -27,7 +27,7 @@ Describe "Endpoint Regression Tests" {
     Context "SSL Certificate Verification" {
         It "SSL certificate subject and dates should be valid for purva.zenalyst.ai" {
             # Run openssl command to get certificate info
-            $certInfo = echo | openssl s_client -servername purva.zenalyst.ai -connect 20.219.60.145:443 2>/dev/null | openssl x509 -noout -subject -dates
+            $certInfo = echo ""| openssl s_client -servername purva.zenalyst.ai -connect 20.219.60.145:443 2>/dev/null | openssl x509 -noout -subject -dates
             
             # Verify that certificate info is not empty
             $certInfo | Should -Not -BeNullOrEmpty
