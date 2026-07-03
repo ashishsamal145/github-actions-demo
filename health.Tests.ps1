@@ -20,6 +20,7 @@ Describe "Endpoint Regression Tests" {
         }
 
         It "HTTP redirects to HTTPS (301)" {
+            # FIXED: Reverted back to your exact requested URL
             $response = Invoke-WebRequest -Uri "http://zenalyst.ai" -Method Get -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction SilentlyContinue
             $response.StatusCode | Should -Be 301
         }
