@@ -26,7 +26,7 @@ jobs:
           Invoke-Pester -Configuration $config | Out-File -FilePath ./test-output.txt
           
           # Print to screen so you can still view it in the GitHub console
-          Get-Content ./test-output.txt
+          cat ./test-output.txt
 
       - name: Send Email Notification
         uses: dawidd6/action-send-mail@v4
