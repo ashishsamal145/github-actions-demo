@@ -1,0 +1,48 @@
+name: Scheduled Regression Tests
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch: 
+
+jobs:
+  run-pester:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Pester tests and save output
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
+          
+          # Custom configuration to output both to screen and a plain text file
+          $config = New-PesterConfiguration
+          $config.Run.Path = "./health.Tests.ps1"
+          $config.Output.Verbosity = "Detailed"
+          
+          # Run tests and pipe the live terminal text output straight into a file
+          Invoke-Pester -Configuration $config | Out-File -FilePath ./test-output.txt
+          
+          # Print to screen so you can still view it in the GitHub console
+          Get-Content ./test-output.txt
+
+      - name: Send Email Notification
+        uses: dawidd6/action-send-mail@v4
+        with:
+          # Your SMTP server settings (e.g., SendGrid, Gmail SMTP, Mailgun)
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: 587
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          
+          subject: "Regression Test Results: ${{ job.status }}"
+          to: "your-email@example.com" # Replace with your target recipient email
+          from: "GitHub Actions <noreply@yourdomain.com>"
+          
+          # Send the raw text output as the email body
+          body: file://test-output.txt
+          
+          # Optional: Attach the file as well
+          attachments: ./test-output.txt
