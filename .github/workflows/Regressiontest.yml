@@ -6,50 +6,22 @@ concurrency:
 
 on:
   schedule:
+    # Runs every day at midnight UTC. Adjust the cron expression as needed.
     - cron: '40 10 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Allows you to trigger the test manually from GitHub UI
 
 jobs:
   run-pester:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout dev branch
         uses: actions/checkout@v4
-        with:
-          ref: dev
 
-      - name: Run Pester tests with results export
+
+      - name: Run Pester tests
         shell: pwsh
         run: |
-          # Install Pester module
+          # Install Pester module if not present, then execute tests
           Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
-          
-          # Run tests and export results to NUnit XML format
-          $config = New-PesterConfiguration
-          $config.Run.Path = './health.Tests.ps1'
-          $config.Output.Verbosity = 'Detailed'
-          $config.TestResult.Enabled = $true
-          $config.TestResult.OutputFormat = 'NUnitXml'
-          $config.TestResult.OutputPath = './test-results.xml'
-          
-          Invoke-Pester -Configuration $config
-          
+          Invoke-Pester -Path ./health.Tests.ps1 -Output Detailed
           Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-
-      - name: Upload test results as artifact
-        uses: actions/upload-artifact@v4
-        if: always()  # Upload even if tests fail
-        with:
-          name: pester-test-results
-          path: ./test-results.xml
-          retention-days: 30
-
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always()
-        with:
-          files: |
-            ./test-results.xml
-          check_name: Pester Test Results
-          comment_mode: off
