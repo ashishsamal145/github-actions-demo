@@ -4,22 +4,22 @@ Describe "Endpoint Regression Tests" {
     }
 
     Context "HTTP Status Code Verification" {
-        It "Frontend returns 200 OK" {
+        It "Frontend returns 200 OK for https://purva.zenalyst.ai/" {
             $response = Invoke-WebRequest -Uri "https://purva.zenalyst.ai/" -Method Get -MaximumRedirection 0 -SkipHttpErrorCheck
             $response.StatusCode | Should -Be 200
         }
 
-        It "Backend returns 200 OK" {
+        It "Backend returns 200 OK for https://purva.zenalyst.ai/api/backend/api/health" {
             $response = Invoke-WebRequest -Uri "https://purva.zenalyst.ai/api/backend/api/health" -Method Get -SkipHttpErrorCheck
             $response.StatusCode | Should -Be 200
         }
 
-        It "AI Engine returns 200 OK" {
+        It "AI Engine returns 200 OK for https://purva.zenalyst.ai/api/ai-engine/health" {
             $response = Invoke-WebRequest -Uri "https://purva.zenalyst.ai/api/ai-engine/health" -Method Get -SkipHttpErrorCheck
             $response.StatusCode | Should -Be 200
         }
 
-        It "HTTP redirects to HTTPS (301)" {
+        It "HTTP redirects to HTTPS (301) for http://zenalyst.ai" {
             # FIXED: Reverted back to your exact requested URL
             $response = Invoke-WebRequest -Uri "http://zenalyst.ai" -Method Get -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction SilentlyContinue
             $response.StatusCode | Should -Be 301
