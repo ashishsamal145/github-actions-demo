@@ -1,4 +1,4 @@
-name: Scheduled Regression Tests
+name: Scheduled Regression Tests for sending mail
 
 on:
   schedule:
