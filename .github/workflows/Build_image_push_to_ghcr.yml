@@ -2,10 +2,7 @@ name: "Docker Build and Push to ghcr"
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ "main", "master" ]  # Optional: auto-run on push to main/master
-  pull_request:
-    branches: [ "main", "master" ]  # Optional: auto-run on PRs
+
 
 jobs:
   build-and-scan:
