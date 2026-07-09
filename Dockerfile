@@ -1,5 +1,5 @@
 # Use a simple, small base image
-FROM node:20-alpine AS builder
+FROM node:18-alpine AS builder
 
 # Update and upgrade packages FIRST (while still root)
 RUN apk update && apk upgrade -U -a
