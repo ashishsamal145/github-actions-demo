@@ -81,11 +81,10 @@ jobs:
           name: trivy-scan-report
           path: trivy-results.sarif
 
-  # Cleanup job - runs only when PR is closed
+  # Cleanup job - Deletes ALL caches except latest for each ref
   cleanup-artifacts:
     runs-on: ubuntu-latest
     needs: [build-and-scan]
-    # Run on ALL events (push, PR open, synchronize, reopened, closed)
     if: |
       github.event_name == 'push' ||
       github.event_name == 'pull_request'
@@ -93,37 +92,99 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Delete caches except latest
+      - name: Get all refs with caches
+        id: get_refs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
         run: |
-          echo "🧹 Cleaning caches for ref: $REF (keeping latest only)"
+          echo "📊 Getting all refs with caches..."
           
-          # Get all cache IDs sorted by last accessed (newest first)
-          CACHE_IDS=$(gh api --paginate \
-            "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-            --jq '.actions_caches[].id' 2>/dev/null || echo "")
+          # Get all unique refs that have caches
+          REFS=$(gh api --paginate "/repos/$REPO/actions/caches" \
+            --jq '.actions_caches[].ref' | sort -u)
           
-          if [ -z "$CACHE_IDS" ]; then
-            echo "✅ No caches found for ref: $REF"
+          if [ -z "$REFS" ]; then
+            echo "✅ No caches found in repository"
+            echo "refs=" >> $GITHUB_OUTPUT
             exit 0
           fi
           
-          TOTAL=$(echo "$CACHE_IDS" | wc -l | xargs)
-          echo "📊 Found $TOTAL caches for ref: $REF"
-          
-          LATEST=$(echo "$CACHE_IDS" | head -1)
-          echo "📌 Keeping latest cache ID: $LATEST"
-          
-          echo "$CACHE_IDS" | tail -n +2 | while read -r CACHE_ID; do
-            if [ -n "$CACHE_ID" ]; then
-              echo "🗑️ Deleting cache ID: $CACHE_ID"
-              gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" 2>/dev/null || echo "⚠️ Failed to delete"
-            fi
+          echo "📁 Found refs with caches:"
+          echo "$REFS" | while read -r ref; do
+            echo "  - $ref"
           done
           
-          DELETED=$(echo "$CACHE_IDS" | tail -n +2 | wc -l | xargs)
-          echo "✅ Kept latest cache ($LATEST)"
-          echo "✅ Deleted $DELETED old caches for ref: $REF"
+          # Store refs for next step
+          echo "refs<<EOF" >> $GITHUB_OUTPUT
+          echo "$REFS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Delete all caches except latest for each ref
+        if: steps.get_refs.outputs.refs != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "🧹 Starting cache cleanup for all refs (keeping latest only)"
+          echo ""
+          
+          # Read refs from previous step
+          REFS="${{ steps.get_refs.outputs.refs }}"
+          
+          if [ -z "$REFS" ]; then
+            echo "✅ No refs to clean"
+            exit 0
+          fi
+          
+          TOTAL_DELETED=0
+          TOTAL_KEPT=0
+          
+          for REF in $REFS; do
+            echo "📁 Processing ref: $REF"
+            
+            # Get all cache IDs for this ref (newest first)
+            CACHE_IDS=$(gh api --paginate \
+              "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
+              --jq '.actions_caches[].id' 2>/dev/null || echo "")
+            
+            if [ -z "$CACHE_IDS" ]; then
+              echo "  ✅ No caches found for ref: $REF"
+              continue
+            fi
+            
+            TOTAL=$(echo "$CACHE_IDS" | wc -l | xargs)
+            echo "  📊 Found $TOTAL caches for ref: $REF"
+            
+            # Keep the first (latest) cache, delete the rest
+            LATEST=$(echo "$CACHE_IDS" | head -1)
+            echo "  📌 Keeping latest cache ID: $LATEST"
+            
+            # Delete all caches except the latest
+            DELETED=0
+            echo "$CACHE_IDS" | tail -n +2 | while read -r CACHE_ID; do
+              if [ -n "$CACHE_ID" ]; then
+                echo "    🗑️ Deleting cache ID: $CACHE_ID"
+                if gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" 2>/dev/null; then
+                  echo "    ✅ Deleted"
+                  DELETED=$((DELETED + 1))
+                else
+                  echo "    ⚠️ Failed to delete"
+                fi
+              fi
+            done
+            
+            DELETED_COUNT=$(echo "$CACHE_IDS" | tail -n +2 | wc -l | xargs)
+            echo "  ✅ Kept latest cache ($LATEST)"
+            echo "  ✅ Deleted $DELETED_COUNT old caches for ref: $REF"
+            echo ""
+            
+            TOTAL_DELETED=$((TOTAL_DELETED + DELETED_COUNT))
+            TOTAL_KEPT=$((TOTAL_KEPT + 1))
+          done
+          
+          echo "🎉 Cache cleanup completed!"
+          echo "📊 Summary:"
+          echo "  - Processed $TOTAL_KEPT refs"
+          echo "  - Deleted $TOTAL_DELETED old caches"
+          echo "  - Kept latest cache for each ref"
