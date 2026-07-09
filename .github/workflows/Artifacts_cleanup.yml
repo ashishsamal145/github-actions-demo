@@ -89,25 +89,3 @@ jobs:
          #   | xargs -r -P 8 -I{} gh api --method DELETE "/users/ashishsamal145/packages/container/github-actions-demo/versions/{}" \
          #  || echo "No versions to delete or error occurred"
             
-
-  # Cleanup job - Keep ONLY the single most recent cache globally
-  cleanup-artifacts:
-    runs-on: ubuntu-latest
-    needs: [build-and-scan,cleanup]
-    if: always()
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Delete caches for this ref
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          # PR close -> refs/pull/<n>/merge ; push -> the pushed branch
-          REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
-        run: |
-          echo "Cleaning caches for ref: $REF"
-          gh api --paginate \
-            "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-            --jq '.actions_caches[].id' \
-            | xargs -r -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}"
