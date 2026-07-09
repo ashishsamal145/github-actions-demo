@@ -87,6 +87,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
    # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
+    # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
   cleanup-artifacts:
     runs-on: ubuntu-latest
     needs: [cleanup]
@@ -95,30 +96,27 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Delete old caches (keep only current ref)
+      - name: Delete old caches (keep only current branch)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          CURRENT_REF: ${{ github.ref }}
+          KEEP_BRANCH: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.event.pull_request.head.ref) || github.ref }}
         run: |
-          echo "🧹 Cleaning up caches - keeping latest for: $CURRENT_REF"
+          echo "🧹 Keeping cache for: $KEEP_BRANCH"
           
           gh api --paginate "/repos/$REPO/actions/caches" --jq '.actions_caches[].ref' | sort -u | while read REF; do
-            if [[ "$REF" == "$CURRENT_REF" ]]; then
-              # Keep latest cache for current ref, delete older ones
-              echo "📁 Keeping latest cache for: $REF"
+            if [[ "$REF" =~ ^refs/pull/ ]]; then
+              # Delete ALL PR caches
+              gh api --paginate "/repos/$REPO/actions/caches?ref=$REF" --jq '.actions_caches[].id' | \
+                xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
+            elif [[ "$REF" == "$KEEP_BRANCH" ]]; then
+              # Keep latest cache for current branch
               gh api --paginate "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
                 --jq '.actions_caches[].id' | tail -n +2 | \
                 xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
             else
-              # Delete ALL caches for everything else (branches, PRs, etc.)
-              echo "🗑️  Deleting ALL caches for: $REF"
+              # Delete ALL caches for everything else
               gh api --paginate "/repos/$REPO/actions/caches?ref=$REF" --jq '.actions_caches[].id' | \
                 xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
             fi
           done
-        
-          
-          echo "✅ Cleanup complete! Only latest cache for $CURRENT_REF remains."
-
-          #############################
