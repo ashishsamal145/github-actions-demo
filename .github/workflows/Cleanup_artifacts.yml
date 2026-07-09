@@ -106,55 +106,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          echo "🧹 Starting global cache cleanup (keeping only the single most recent cache)"
-          echo ""
-          
-          # Get ALL caches sorted by last_accessed_at (newest first)
-          ALL_CACHES=$(gh api --paginate "/repos/$REPO/actions/caches" \
-            --jq '.actions_caches | sort_by(.last_accessed_at) | reverse')
-          
-          TOTAL=$(echo "$ALL_CACHES" | jq -s 'length')
-          
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "✅ No caches found in repository"
-            exit 0
-          fi
-          
-          echo "📊 Found $TOTAL caches in repository"
-          
-          # Get the most recent cache (first one)
-          LATEST_ID=$(echo "$ALL_CACHES" | jq -r '.[0].id')
-          LATEST_KEY=$(echo "$ALL_CACHES" | jq -r '.[0].key')
-          LATEST_REF=$(echo "$ALL_CACHES" | jq -r '.[0].ref')
-          LATEST_SIZE=$(echo "$ALL_CACHES" | jq -r '.[0].size_in_bytes / 1024 / 1024 | floor')
-          LATEST_ACCESSED=$(echo "$ALL_CACHES" | jq -r '.[0].last_accessed_at')
-          
-          echo "📌 Keeping ONLY the most recent cache:"
-          echo "   ID: $LATEST_ID"
-          echo "   Key: $LATEST_KEY"
-          echo "   Ref: $LATEST_REF"
-          echo "   Size: $LATEST_SIZE MB"
-          echo "   Last Accessed: $LATEST_ACCESSED"
-          echo ""
-          
-          # Delete ALL other caches (skip the first one)
-          DELETED=0
-          echo "$ALL_CACHES" | jq -r '.[1:][] | .id' | while read -r CACHE_ID; do
-            if [ -n "$CACHE_ID" ]; then
-              echo "🗑️ Deleting cache ID: $CACHE_ID"
-              if gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" 2>/dev/null; then
-                echo "✅ Deleted"
-                DELETED=$((DELETED + 1))
-              else
-                echo "⚠️ Failed to delete"
-              fi
-            fi
+          gh api --paginate "/repos/$REPO/actions/caches" \
+          --jq '.actions_caches[].ref' | sort -u | while read REF; do \
+          gh api --paginate "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
+            --jq '.actions_caches[].id' | tail -n +2 | \
+            xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}"; \
           done
-          
-          DELETED_COUNT=$((TOTAL - 1))
-          echo ""
-          echo "🎉 Cache cleanup completed!"
-          echo "📊 Summary:"
-          echo "  - Total caches found: $TOTAL"
-          echo "  - Kept: 1 (most recent)"
-          echo "  - Deleted: $DELETED_COUNT old caches"
