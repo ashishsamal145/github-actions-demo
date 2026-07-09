@@ -88,6 +88,11 @@ jobs:
 
    # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
     # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
+  # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
+  # PRs: delete every cache tied to this PR's ref outright — PR caches are
+  # short-lived and not worth the quota once this run has what it needs.
+  # main/dev pushes: keep the newest cache per key group (Buildx gha scope,
+  # or whatever else gets added later) and delete older superseded ones.
   cleanup-artifacts:
     runs-on: ubuntu-latest
     needs: [cleanup]
@@ -96,33 +101,38 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Delete superseded caches for this ref, keep newest per key group
+      - name: Delete PR caches (all) or superseded branch caches (keep newest per key group)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          # PR close -> refs/pull/<n>/merge ; push -> the pushed branch
+          EVENT: ${{ github.event_name }}
+          # PR -> refs/pull/<n>/merge ; push -> the pushed branch
           REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
         run: |
-          echo "Cleaning caches for ref: $REF"
+          echo "Cleaning caches for ref: $REF (event: $EVENT)"
 
           gh api --paginate \
             "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
             --jq '.actions_caches' > caches.json
 
-          # Group by normalized key (trailing hash stripped) so distinct cache
-          # families (Maven / npm / pip / Buildx gha scope) never compete with
-          # each other for "newest." Within each group, keep the most
-          # recently accessed entry and mark the rest for deletion.
-          jq -r '
-            group_by(.key | sub("[-_][0-9a-fA-F]{8,64}$"; ""))
-            | .[]
-            | sort_by(.last_accessed_at) | reverse
-            | .[1:][]
-            | .id
-          ' caches.json > stale_ids.txt
+          if [ "$EVENT" = "pull_request" ]; then
+            # PR ref: delete everything, no "keep newest" — nothing on a PR
+            # ref is worth carrying forward once this run is done with it.
+            jq -r '.[].id' caches.json > stale_ids.txt
+          else
+            # Branch ref (main/dev via push): group by normalized key
+            # (trailing hash stripped) so distinct cache families never
+            # compete with each other for "newest." Keep the most recently
+            # accessed entry per group, delete the rest.
+            jq -r '
+              group_by(.key | sub("[-_][0-9a-fA-F]{8,64}$"; ""))
+              | .[]
+              | sort_by(.last_accessed_at) | reverse
+              | .[1:][]
+              | .id
+            ' caches.json > stale_ids.txt
+          fi
 
-          echo "Deleting $(wc -l < stale_ids.txt) superseded cache(s), keeping newest per key group."
+          echo "Deleting $(wc -l < stale_ids.txt) cache(s)."
           xargs -r -P 8 -I{} gh api --method DELETE \
             "/repos/$REPO/actions/caches/{}" < stale_ids.txt
-
-          ################################
