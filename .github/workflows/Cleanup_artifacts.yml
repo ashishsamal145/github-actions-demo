@@ -52,40 +52,49 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          no-cache: true
 
-      - name: Install Trivy
+      
+
+  cleanup:
+    name: Cleanup Old Images
+    runs-on: ubuntu-latest
+    needs: build-and-scan  # Wait for build to complete
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'  # Only run on main/master
+    permissions:
+      packages: write  # Required to delete packages
+    
+    steps:
+      - name: Install GitHub CLI
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.69.3
-          trivy -v
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh -y
 
-      - name: Run Trivy scanner on the pushed image (Table format)
+      - name: Authenticate with GitHub CLI
         run: |
-          trivy image --severity CRITICAL,HIGH ghcr.io/${{ github.repository }}:latest
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
 
-      - name: Generate SARIF report
+      - name: Delete old package versions (keep versions with "purvankara" tag)
         run: |
-          trivy image --format sarif --output trivy-results.sarif ghcr.io/${{ github.repository }}:latest
-        continue-on-error: true
+          echo "Fetching versions and deleting old ones..."
 
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-results.sarif') != ''
-        with:
-          sarif_file: 'trivy-results.sarif'
-          category: 'trivy-scan'
+          gh api /users/ashishsamal145/packages/container/github-actions-demo/versions \
+            --jq '.[] | select((.metadata.container.tags // []) as $t | (($t | all(test("^(sha-)?[a-f0-9]{7,40}$"))))) | .id'    \
+            | xargs -r -P 8 -I{} gh api --method DELETE "/users/ashishsamal145/packages/container/github-actions-demo/versions/{}" \
+            || echo "No versions to delete or error occurred"
 
-      - name: Upload scan report as a workflow artifact
-        uses: actions/upload-artifact@v4
-        if: always() && hashFiles('trivy-results.sarif') != ''
-        with:
-          name: trivy-scan-report
-          path: trivy-results.sarif
+        # gh api /users/ashishsamal145/packages/container/github-actions-demo/versions \
+         #  --jq 'map(select(.metadata.container.tags | map(select(. == "purvankara" or . == "books")) | length == 0)) | .[1:] | .[].id' \
+         #   | xargs -r -P 8 -I{} gh api --method DELETE "/users/ashishsamal145/packages/container/github-actions-demo/versions/{}" \
+         #  || echo "No versions to delete or error occurred"
+            
 
-  # Cleanup job - runs only when PR is closed
+  # Cleanup job - Keep ONLY the single most recent cache globally
   cleanup-artifacts:
     runs-on: ubuntu-latest
-    needs: [build-and-scan]
-    # Run on ALL events (push, PR open, synchronize, reopened, closed)
+    needs: [build-and-scan,cleanup]
     if: |
       github.event_name == 'push' ||
       github.event_name == 'pull_request'
@@ -93,37 +102,60 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Delete caches except latest
+      - name: Delete ALL caches except the single most recent one
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
         run: |
-          echo "🧹 Cleaning caches for ref: $REF (keeping latest only)"
+          echo "🧹 Starting global cache cleanup (keeping only the single most recent cache)"
+          echo ""
           
-          # Get all cache IDs sorted by last accessed (newest first)
-          CACHE_IDS=$(gh api --paginate \
-            "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-            --jq '.actions_caches[].id' 2>/dev/null || echo "")
+          # Get ALL caches sorted by last_accessed_at (newest first)
+          ALL_CACHES=$(gh api --paginate "/repos/$REPO/actions/caches" \
+            --jq '.actions_caches | sort_by(.last_accessed_at) | reverse')
           
-          if [ -z "$CACHE_IDS" ]; then
-            echo "✅ No caches found for ref: $REF"
+          TOTAL=$(echo "$ALL_CACHES" | jq -s 'length')
+          
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "✅ No caches found in repository"
             exit 0
           fi
           
-          TOTAL=$(echo "$CACHE_IDS" | wc -l | xargs)
-          echo "📊 Found $TOTAL caches for ref: $REF"
+          echo "📊 Found $TOTAL caches in repository"
           
-          LATEST=$(echo "$CACHE_IDS" | head -1)
-          echo "📌 Keeping latest cache ID: $LATEST"
+          # Get the most recent cache (first one)
+          LATEST_ID=$(echo "$ALL_CACHES" | jq -r '.[0].id')
+          LATEST_KEY=$(echo "$ALL_CACHES" | jq -r '.[0].key')
+          LATEST_REF=$(echo "$ALL_CACHES" | jq -r '.[0].ref')
+          LATEST_SIZE=$(echo "$ALL_CACHES" | jq -r '.[0].size_in_bytes / 1024 / 1024 | floor')
+          LATEST_ACCESSED=$(echo "$ALL_CACHES" | jq -r '.[0].last_accessed_at')
           
-          echo "$CACHE_IDS" | tail -n +2 | while read -r CACHE_ID; do
+          echo "📌 Keeping ONLY the most recent cache:"
+          echo "   ID: $LATEST_ID"
+          echo "   Key: $LATEST_KEY"
+          echo "   Ref: $LATEST_REF"
+          echo "   Size: $LATEST_SIZE MB"
+          echo "   Last Accessed: $LATEST_ACCESSED"
+          echo ""
+          
+          # Delete ALL other caches (skip the first one)
+          DELETED=0
+          echo "$ALL_CACHES" | jq -r '.[1:][] | .id' | while read -r CACHE_ID; do
             if [ -n "$CACHE_ID" ]; then
               echo "🗑️ Deleting cache ID: $CACHE_ID"
-              gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" 2>/dev/null || echo "⚠️ Failed to delete"
+              if gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" 2>/dev/null; then
+                echo "✅ Deleted"
+                DELETED=$((DELETED + 1))
+              else
+                echo "⚠️ Failed to delete"
+              fi
             fi
           done
           
-          DELETED=$(echo "$CACHE_IDS" | tail -n +2 | wc -l | xargs)
-          echo "✅ Kept latest cache ($LATEST)"
-          echo "✅ Deleted $DELETED old caches for ref: $REF"
+          DELETED_COUNT=$((TOTAL - 1))
+          echo ""
+          echo "🎉 Cache cleanup completed!"
+          echo "📊 Summary:"
+          echo "  - Total caches found: $TOTAL"
+          echo "  - Kept: 1 (most recent)"
+          echo "  - Deleted: $DELETED_COUNT old caches"
