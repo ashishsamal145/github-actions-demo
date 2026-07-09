@@ -117,137 +117,101 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          REF: "${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.base_ref) || github.ref }}"
+
         run: |
-          # set -euo pipefail
-
-          # echo "Fetching all caches..."
+          
+         
+          # Determine the target branch dynamically.
+          # if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          #   TARGET_BRANCH="${{ github.event.pull_request.base.ref }}"
+          # else
+          #   TARGET_BRANCH="${{ github.ref_name }}"
+          # fi
+  
+          # TARGET_REF="refs/heads/${TARGET_BRANCH}"
+  
+          # echo "Target branch : $TARGET_BRANCH"
+          # echo "Target ref    : $TARGET_REF"
+  
+          # echo "Fetching caches..."
           # gh api "repos/$REPO/actions/caches" --paginate > caches.json
-
-          # echo "========================================="
-          # echo "Deleting ALL Pull Request caches..."
+  
+          # ############################################################
+          # # Delete ALL PR caches
+          # ############################################################
+          # echo "Deleting PR caches..."
+  
           # jq -r '
           #   .actions_caches[]
           #   | select(.ref | startswith("refs/pull/"))
           #   | .id
-          # ' caches.json | while read -r id; do
-          #     echo "Deleting PR cache: $id"
-          #     gh api --method DELETE "repos/$REPO/actions/caches/$id"
+          # ' caches.json |
+          # while read -r id; do
+          #   echo "Deleting PR cache $id"
+          #   gh api --method DELETE "repos/$REPO/actions/caches/$id"
           # done
-
-          # echo "========================================="
-          # echo "Deleting ALL caches from branches except main/dev..."
-
-          # jq -r '
+  
+          # ############################################################
+          # # Delete caches from all other branches
+          # ############################################################
+          # echo "Deleting caches from non-target branches..."
+  
+          # jq -r --arg target "$TARGET_REF" '
           #   .actions_caches[]
           #   | select(
           #       (.ref | startswith("refs/heads/"))
-          #       and (.ref != "refs/heads/main")
-          #       and (.ref != "refs/heads/dev")
+          #       and (.ref != $target)
           #     )
           #   | .id
-          # ' caches.json | while read -r id; do
-          #     echo "Deleting cache: $id"
-          #     gh api --method DELETE "repos/$REPO/actions/caches/$id"
+          # ' caches.json |
+          # while read -r id; do
+          #   echo "Deleting cache $id"
+          #   gh api --method DELETE "repos/$REPO/actions/caches/$id"
           # done
-
-          # echo "========================================="
-          # echo "Keeping ONLY latest cache for main..."
-
-          # jq -r '
+  
+          # ############################################################
+          # # Keep only the newest cache for the target branch
+          # ############################################################
+          # echo "Keeping latest cache for $TARGET_BRANCH..."
+  
+          # jq -r --arg target "$TARGET_REF" '
           #   .actions_caches
-          #   | map(select(.ref=="refs/heads/main"))
+          #   | map(select(.ref == $target))
           #   | sort_by(.last_accessed_at)
           #   | reverse
           #   | .[1:]
           #   | .[].id
-          # ' caches.json | while read -r id; do
-          #     echo "Deleting old main cache: $id"
-          #     gh api --method DELETE "repos/$REPO/actions/caches/$id"
+          # ' caches.json |
+          # while read -r id; do
+          #   echo "Deleting old cache $id"
+          #   gh api --method DELETE "repos/$REPO/actions/caches/$id"
           # done
-
-          # echo "========================================="
-          # echo "Keeping ONLY latest cache for dev..."
-
-          # jq -r '
-          #   .actions_caches
-          #   | map(select(.ref=="refs/heads/dev"))
-          #   | sort_by(.last_accessed_at)
-          #   | reverse
-          #   | .[1:]
-          #   | .[].id
-          # ' caches.json | while read -r id; do
-          #     echo "Deleting old dev cache: $id"
-          #     gh api --method DELETE "repos/$REPO/actions/caches/$id"
-          # done
-
-          # echo "========================================="
+  
           # echo "GitHub Actions cache cleanup completed."
+          echo "Keeping latest cache for: $REF"
 
-          
-          # Determine the target branch dynamically.
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            TARGET_BRANCH="${{ github.event.pull_request.base.ref }}"
-          else
-            TARGET_BRANCH="${{ github.ref_name }}"
-          fi
-  
-          TARGET_REF="refs/heads/${TARGET_BRANCH}"
-  
-          echo "Target branch : $TARGET_BRANCH"
-          echo "Target ref    : $TARGET_REF"
-  
-          echo "Fetching caches..."
-          gh api "repos/$REPO/actions/caches" --paginate > caches.json
-  
-          ############################################################
-          # Delete ALL PR caches
-          ############################################################
-          echo "Deleting PR caches..."
-  
-          jq -r '
-            .actions_caches[]
-            | select(.ref | startswith("refs/pull/"))
-            | .id
-          ' caches.json |
-          while read -r id; do
-            echo "Deleting PR cache $id"
-            gh api --method DELETE "repos/$REPO/actions/caches/$id"
-          done
-  
-          ############################################################
-          # Delete caches from all other branches
-          ############################################################
-          echo "Deleting caches from non-target branches..."
-  
-          jq -r --arg target "$TARGET_REF" '
-            .actions_caches[]
-            | select(
-                (.ref | startswith("refs/heads/"))
-                and (.ref != $target)
-              )
-            | .id
-          ' caches.json |
-          while read -r id; do
-            echo "Deleting cache $id"
-            gh api --method DELETE "repos/$REPO/actions/caches/$id"
-          done
-  
-          ############################################################
-          # Keep only the newest cache for the target branch
-          ############################################################
-          echo "Keeping latest cache for $TARGET_BRANCH..."
-  
-          jq -r --arg target "$TARGET_REF" '
+          gh api --paginate "/repos/$REPO/actions/caches" \
+          | jq -r --arg ref "$REF" '
             .actions_caches
-            | map(select(.ref == $target))
-            | sort_by(.last_accessed_at)
-            | reverse
-            | .[1:]
+            | (
+                # Delete all PR caches
+                map(select(.ref | startswith("refs/pull/")))
+                +
+                # Delete all branch caches except the latest for the target branch
+                (
+                  map(select(.ref == $ref))
+                  | sort_by(.last_accessed_at)
+                  | reverse
+                  | .[1:]
+                )
+                +
+                # Delete caches from every other branch
+                map(select(
+                  (.ref | startswith("refs/heads/"))
+                  and (.ref != $ref)
+                ))
+              )
             | .[].id
-          ' caches.json |
-          while read -r id; do
-            echo "Deleting old cache $id"
-            gh api --method DELETE "repos/$REPO/actions/caches/$id"
-          done
-  
-          echo "GitHub Actions cache cleanup completed."
+          ' | sort -u \
+          | xargs -r -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}"
