@@ -33,7 +33,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=buildcache-purvankara  # Added books tag
+            type=raw,value=buildcache-sattva  # Added books tag
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -52,10 +52,10 @@ jobs:
           trivy -v
       - name: Run Trivy scanner on the pushed image (Table format)
         run: |
-          trivy image --severity CRITICAL,HIGH ghcr.io/${{ github.repository }}:buildcache-purvankara
+          trivy image --severity CRITICAL,HIGH ghcr.io/${{ github.repository }}:buildcache-sattva
       - name: Generate SARIF report
         run: |
-          trivy image --format sarif --output trivy-results.sarif ghcr.io/${{ github.repository }}:buildcache-purvankara
+          trivy image --format sarif --output trivy-results.sarif ghcr.io/${{ github.repository }}:buildcache-sattva
         continue-on-error: true
 
       - name: Upload Trivy scan results to GitHub Security tab
