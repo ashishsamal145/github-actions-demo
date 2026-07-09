@@ -86,7 +86,7 @@ jobs:
   cleanup-artifacts:
     runs-on: ubuntu-latest
     # ✅ FIXED: Remove 'cleanup' dependency so it runs on PRs
-    needs: [build-and-scan]
+    needs: [build-and-scan,cleanup]
     # ✅ FIXED: Run on ALL events (push AND pull_request)
     if: |
       github.event_name == 'push' ||
