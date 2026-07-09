@@ -5,14 +5,7 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
-    types: [opened, synchronize, reopened]  # For build
-  # Separate trigger for cleanup on PR close
-  pull_request:
-    branches: [main, dev]
-    types: [closed]  # For cleanup
-  schedule:
-    - cron: '0 3 * * 0'  # Weekly cleanup at 3 AM Sunday
-  workflow_dispatch:  # Manual trigger
+    types: [opened, synchronize, reopened, closed]
 
 jobs:
   build-and-scan:
@@ -22,7 +15,6 @@ jobs:
       contents: read
       security-events: write
       packages: write
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -89,23 +81,20 @@ jobs:
           name: trivy-scan-report
           path: trivy-results.sarif
 
-  # Cleanup job
+  # Cleanup job - runs only when PR is closed
   cleanup-artifacts:
     runs-on: ubuntu-latest
-    needs: []  # Run independently, don't wait for build
-    if: |
-      (github.event_name == 'pull_request' && github.event.action == 'closed') ||
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch'
+    needs: [build-and-scan]
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
     permissions:
       actions: write
       contents: read
     steps:
-      - name: Delete all caches except the latest for each ref
+      - name: Delete caches except latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
+          REF: ${{ format('refs/pull/{0}/merge', github.event.pull_request.number) }}
         run: |
           echo "🧹 Cleaning caches for ref: $REF (keeping latest only)"
           
@@ -114,32 +103,24 @@ jobs:
             "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
             --jq '.actions_caches[].id' 2>/dev/null || echo "")
           
-          # Check if we got any caches
           if [ -z "$CACHE_IDS" ]; then
             echo "✅ No caches found for ref: $REF"
             exit 0
           fi
           
-          # Count total caches
           TOTAL=$(echo "$CACHE_IDS" | wc -l | xargs)
           echo "📊 Found $TOTAL caches for ref: $REF"
           
-          # Keep the first (latest) cache, delete the rest
           LATEST=$(echo "$CACHE_IDS" | head -1)
           echo "📌 Keeping latest cache ID: $LATEST"
           
-          # Delete all caches except the latest
           echo "$CACHE_IDS" | tail -n +2 | while read -r CACHE_ID; do
             if [ -n "$CACHE_ID" ]; then
               echo "🗑️ Deleting cache ID: $CACHE_ID"
-              if gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" 2>/dev/null; then
-                echo "✅ Deleted"
-              else
-                echo "⚠️ Failed to delete"
-              fi
+              gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" 2>/dev/null || echo "⚠️ Failed to delete"
             fi
           done
           
-          DELETED_COUNT=$(echo "$CACHE_IDS" | tail -n +2 | wc -l | xargs)
+          DELETED=$(echo "$CACHE_IDS" | tail -n +2 | wc -l | xargs)
           echo "✅ Kept latest cache ($LATEST)"
-          echo "✅ Deleted $DELETED_COUNT old caches for ref: $REF"
+          echo "✅ Deleted $DELETED old caches for ref: $REF"
