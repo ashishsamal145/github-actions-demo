@@ -206,11 +206,20 @@ jobs:
             # Delete all caches except the latest
             DELETED_COUNT=$(echo "$CACHE_IDS" | tail -n +2 | wc -l | xargs)
             
+            # if [ "$DELETED_COUNT" -gt 0 ]; then
+            #   echo "  🗑️ Deleting $DELETED_COUNT old caches..."
+            #   echo "$CACHE_IDS" | tail -n +2 | \
+            #     xargs -r -P 8 -I{} gh api --method DELETE \
+            #       "/repos/$REPO/actions/caches/{}"
+            #   echo "  ✅ Deleted $DELETED_COUNT old caches"
+            # else
+            #   echo "  ℹ️ Only 1 cache found, keeping it"
+            # fi
+
             if [ "$DELETED_COUNT" -gt 0 ]; then
               echo "  🗑️ Deleting $DELETED_COUNT old caches..."
               echo "$CACHE_IDS" | tail -n +2 | \
-                xargs -r -P 8 -I{} gh api --method DELETE \
-                  "/repos/$REPO/actions/caches/{}"
+                xargs -r -P 8 -I{} bash -c 'gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true'
               echo "  ✅ Deleted $DELETED_COUNT old caches"
             else
               echo "  ℹ️ Only 1 cache found, keeping it"
