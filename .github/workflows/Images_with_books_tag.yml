@@ -35,7 +35,7 @@ jobs:
           tags: |
             type=sha,format=long  # Unique SHA tag - NEVER overwritten
             type=semver,pattern={{version}}
-            type=raw,value=Shakira,enable={{is_default_branch}}
+            type=raw,value=shakira,enable={{is_default_branch}}
 
 
       - name: Build and push Docker image
@@ -55,10 +55,10 @@ jobs:
           trivy -v
       - name: Run Trivy scanner on the pushed image (Table format)
         run: |
-          trivy image --severity CRITICAL,HIGH ghcr.io/${{ github.repository }}:Shakira
+          trivy image --severity CRITICAL,HIGH ghcr.io/${{ github.repository }}:shakira
       - name: Generate SARIF report
         run: |
-          trivy image --format sarif --output trivy-results.sarif ghcr.io/${{ github.repository }}:Shakira
+          trivy image --format sarif --output trivy-results.sarif ghcr.io/${{ github.repository }}:shakira
         continue-on-error: true
 
       - name: Upload Trivy scan results to GitHub Security tab
