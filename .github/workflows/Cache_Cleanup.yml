@@ -86,79 +86,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Cleanup job - Deletes ALL old caches (keeps latest per ref)
-  # cleanup-artifacts:
-  #   runs-on: ubuntu-latest
-  #   # ✅ FIXED: Remove 'cleanup' dependency so it runs on PRs
-  #   needs: [build-and-scan,cleanup]
-  #   # ✅ FIXED: Run on ALL events (push AND pull_request)
-  #   if: |
-  #     github.event_name == 'push' ||
-  #     github.event_name == 'pull_request'
-  #   permissions:
-  #     actions: write
-  #     contents: read
-  #   steps:
-  #     - name: Delete old caches (keep latest per ref)
-  #       env:
-  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #         REPO: ${{ github.repository }}
-  #         REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
-  #       run: |
-  #         # echo "🧹 Cleaning up old caches (keeping latest per ref)"
-  #         # echo "📁 Repository: $REPO"
-  #         # echo ""
-          
-  #         # # Get ALL refs with caches and delete old ones (keep latest per ref)
-  #         # gh api --paginate "/repos/$REPO/actions/caches" \
-  #         #   --jq '.actions_caches[].ref' | sort -u | while read REF; do \
-  #         #   echo "📁 Processing ref: $REF"; \
-  #         #   gh api --paginate "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-  #         #     --jq '.actions_caches[].id' | tail -n +2 | \
-  #         #   xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}"; \
-  #         #   echo "  ✅ Cleaned up caches for ref: $REF"; \
-  #         # done
-          
-  #         # echo "🎉 Cache cleanup completed!"
-
-  #         echo "🧹 Cleaning up old caches (keeping latest per ref)"
-  #         echo "📁 Repository: $REPO"
-  #         echo "📌 Event: ${{ github.event_name }}"
-  #         echo ""
-          
-  #         # Get ALL refs with caches
-  #         REFS=$(gh api --paginate "/repos/$REPO/actions/caches" \
-  #           --jq '.actions_caches[].ref' | sort -u)
-          
-  #         if [ -z "$REFS" ]; then
-  #           echo "✅ No caches found"
-  #           exit 0
-  #         fi
-          
-  #         echo "📁 Found refs with caches:"
-  #         echo "$REFS" | while read -r ref; do echo "  - $ref"; done
-  #         echo ""
-          
-  #         # Process each ref - delete old caches, keep latest
-  #         for REF in $REFS; do
-  #           echo "📁 Processing ref: $REF"
-            
-  #           # Get cache IDs (newest first)
-  #           CACHE_IDS=$(gh api --paginate \
-  #             "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-  #             --jq '.actions_caches[].id' 2>/dev/null || echo "")
-            
-  #           if [ -z "$CACHE_IDS" ]; then
-  #             echo "  ✅ No caches found for ref: $REF"
-  #             continue
-  #           fi
-  # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
+    # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
   cleanup-artifacts:
     runs-on: ubuntu-latest
-    needs: [cleanup]  # No dependencies - run independently
-    if: |
-      github.event_name == 'push' ||
-      github.event_name == 'pull_request'
+    needs: [cleanup]
+    if: always()
     permissions:
       actions: write
       contents: read
@@ -168,89 +100,126 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          set +e  # Don't exit on errors
+          set +e
           
           echo "🧹 Cleaning up caches"
           echo "📁 Repository: $REPO"
           echo "📌 Event: ${{ github.event_name }}"
+          echo "📌 Ref: ${{ github.ref }}"
           echo ""
           
-          # Check if this is a pull request
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-            PR_REF="refs/pull/$PR_NUMBER/merge"
-            
-            echo "🔴 PR DETECTED - Deleting ALL caches for PR #$PR_NUMBER"
-            echo "   Merge ref: $PR_REF"
+          # NEW: For branch pushes, we want to delete ALL PR caches too
+          # Because PR caches are orphaned when PRs are closed/merged
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "🟢 BRANCH PUSH DETECTED - Cleaning up ALL caches"
             echo ""
             
-            # Fetch all cache IDs for this PR
-            CACHE_IDS=$(gh api --paginate "/repos/$REPO/actions/caches?ref=$PR_REF" \
-              --jq '.actions_caches[].id' 2>/dev/null)
-            
-            if [ -z "$CACHE_IDS" ]; then
-              echo "✅ No caches found for this PR"
-            else
-              CACHE_COUNT=$(echo "$CACHE_IDS" | grep -c .)
-              echo "   Found $CACHE_COUNT cache(s) to delete"
-              echo ""
-              
-              # Delete each cache
-              echo "$CACHE_IDS" | while read -r CACHE_ID; do
-                if [ -n "$CACHE_ID" ]; then
-                  echo "   Deleting cache ID: $CACHE_ID"
-                  if gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" >/dev/null 2>&1; then
-                    echo "   ✅ Deleted successfully"
-                  else
-                    echo "   ⚠️  Failed or already deleted"
-                  fi
-                fi
-              done
-              echo ""
-              echo "✅ PR cache cleanup completed"
-            fi
-          else
-            # For branch pushes: Keep latest cache per ref, delete older ones
-            echo "🟢 BRANCH PUSH - Keeping latest cache per branch"
-            echo ""
-            
-            # Get all unique refs with caches
+            # Get ALL unique refs with caches
             REFS=$(gh api --paginate "/repos/$REPO/actions/caches" \
               --jq '.actions_caches[].ref' 2>/dev/null | sort -u)
             
             if [ -z "$REFS" ]; then
               echo "✅ No caches found"
             else
+              echo "📁 Found refs with caches:"
+              echo "$REFS" | while read -r ref; do echo "  - $ref"; done
+              echo ""
+              
+              # Process each ref
               echo "$REFS" | while read -r REF; do
                 if [ -n "$REF" ]; then
-                  echo "📁 Processing ref: $REF"
-                  
-                  # Get all cache IDs for this ref, sorted by last_accessed_at (newest first)
-                  CACHES=$(gh api --paginate "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-                    --jq '.actions_caches[] | "\(.id)|\(.last_accessed_at)"' 2>/dev/null)
-                  
-                  if [ -z "$CACHES" ]; then
-                    echo "   No caches for this ref"
+                  # Check if this is a PR ref
+                  if [[ "$REF" =~ ^refs/pull/[0-9]+/merge$ ]]; then
+                    echo "🔴 PR CACHE DETECTED - Deleting ALL caches for $REF"
+                    
+                    # Delete ALL caches for this PR (don't keep any)
+                    CACHE_IDS=$(gh api --paginate "/repos/$REPO/actions/caches?ref=$REF" \
+                      --jq '.actions_caches[].id' 2>/dev/null)
+                    
+                    if [ -n "$CACHE_IDS" ]; then
+                      CACHE_COUNT=$(echo "$CACHE_IDS" | grep -c .)
+                      echo "   Found $CACHE_COUNT cache(s) to delete"
+                      echo "$CACHE_IDS" | while read -r CACHE_ID; do
+                        if [ -n "$CACHE_ID" ]; then
+                          echo "   🗑️  Deleting cache ID: $CACHE_ID"
+                          gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" >/dev/null 2>&1 || true
+                        fi
+                      done
+                      echo "   ✅ PR cache cleanup completed"
+                    else
+                      echo "   ✅ No caches found for $REF"
+                    fi
+                    echo ""
                   else
-                    CACHE_LINE_NUM=0
-                    echo "$CACHES" | while read -r CACHE_LINE; do
-                      CACHE_LINE_NUM=$((CACHE_LINE_NUM + 1))
-                      CACHE_ID=$(echo "$CACHE_LINE" | cut -d'|' -f1)
-                      CACHE_DATE=$(echo "$CACHE_LINE" | cut -d'|' -f2)
-                      
-                      if [ "$CACHE_LINE_NUM" -eq 1 ]; then
-                        echo "   ✨ Keeping latest cache: $CACHE_ID (accessed: $CACHE_DATE)"
-                      else
-                        echo "   🗑️  Deleting old cache: $CACHE_ID"
-                        gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" >/dev/null 2>&1 || true
-                      fi
-                    done
+                    # For branch refs: Keep latest, delete older
+                    echo "📁 Processing branch ref: $REF"
+                    
+                    # Get all cache IDs for this ref, sorted by last_accessed_at (newest first)
+                    CACHES=$(gh api --paginate "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
+                      --jq '.actions_caches[] | "\(.id)|\(.last_accessed_at)"' 2>/dev/null)
+                    
+                    if [ -z "$CACHES" ]; then
+                      echo "   No caches for this ref"
+                    else
+                      CACHE_LINE_NUM=0
+                      echo "$CACHES" | while read -r CACHE_LINE; do
+                        CACHE_LINE_NUM=$((CACHE_LINE_NUM + 1))
+                        CACHE_ID=$(echo "$CACHE_LINE" | cut -d'|' -f1)
+                        CACHE_DATE=$(echo "$CACHE_LINE" | cut -d'|' -f2)
+                        
+                        if [ "$CACHE_LINE_NUM" -eq 1 ]; then
+                          echo "   ✨ Keeping latest cache: $CACHE_ID (accessed: $CACHE_DATE)"
+                        else
+                          echo "   🗑️  Deleting old cache: $CACHE_ID"
+                          gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" >/dev/null 2>&1 || true
+                        fi
+                      done
+                    fi
+                    echo ""
                   fi
                 fi
               done
-              echo ""
-              echo "✅ Branch cache cleanup completed"
+              echo "✅ Cache cleanup completed"
             fi
+            
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            # For PR events: Delete ALL PR caches
+            echo "🔴 PR EVENT DETECTED - Deleting ALL caches for this PR"
+            echo ""
+            
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            PR_MERGE_REF="refs/pull/$PR_NUMBER/merge"
+            PR_HEAD_REF="${{ github.event.pull_request.head.ref }}"
+            
+            echo "   PR #$PR_NUMBER"
+            echo "   Merge ref: $PR_MERGE_REF"
+            echo "   Head ref: refs/heads/$PR_HEAD_REF"
+            echo ""
+            
+            # Delete caches for both merge and head refs
+            for REF in "$PR_MERGE_REF" "refs/heads/$PR_HEAD_REF"; do
+              echo "📁 Checking ref: $REF"
+              
+              CACHE_IDS=$(gh api --paginate "/repos/$REPO/actions/caches?ref=$REF" \
+                --jq '.actions_caches[].id' 2>/dev/null)
+              
+              if [ -z "$CACHE_IDS" ]; then
+                echo "   ✅ No caches found for $REF"
+              else
+                CACHE_COUNT=$(echo "$CACHE_IDS" | grep -c .)
+                echo "   Found $CACHE_COUNT cache(s) to delete"
+                echo "$CACHE_IDS" | while read -r CACHE_ID; do
+                  if [ -n "$CACHE_ID" ]; then
+                    echo "   🗑️  Deleting cache ID: $CACHE_ID"
+                    gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" >/dev/null 2>&1 || true
+                  fi
+                done
+                echo "   ✅ Cleanup completed for $REF"
+              fi
+              echo ""
+            done
+            
+            echo "✅ PR cache cleanup completed"
           fi
           
           echo ""
