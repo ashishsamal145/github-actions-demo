@@ -19,6 +19,12 @@ Describe "Endpoint Regression Tests" {
             $response.StatusCode | Should -Be 200
         }
 
+        
+        It "AI Engine returns 200 OK for https://swostitechnologies.com/" {
+            $response = Invoke-WebRequest -Uri "https://swostitechnologies.com/" -Method Get -SkipHttpErrorCheck
+            $response.StatusCode | Should -Be 200
+        }
+
         It "HTTP redirects to HTTPS (301) for http://zenalyst.ai" {
             # FIXED: Reverted back to your exact requested URL
             $response = Invoke-WebRequest -Uri "http://zenalyst.ai" -Method Get -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction SilentlyContinue
