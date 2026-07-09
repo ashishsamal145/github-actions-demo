@@ -109,39 +109,51 @@ jobs:
     permissions:
       actions: write
       contents: read
+      pull-requests: read
     steps:
-      - name: Delete PR caches (all) or superseded branch index caches
+      - name: Delete PR-branch caches; prune superseded index generations elsewhere
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          EVENT: ${{ github.event_name }}
-          # Use github.ref as-is — verify in your own run logs what this
-          # actually resolves to for pull_request events (branch ref vs
-          # refs/pull/<n>/merge) rather than assuming; forcing a conversion
-          # here risks targeting a ref that was never used to write the cache.
-          REF: ${{ github.ref }}
         run: |
-          echo "Cleaning caches for ref: $REF (event: $EVENT)"
+          # 1. Branches with an open PR right now.
+          gh api --paginate "/repos/$REPO/pulls?state=open&per_page=100" \
+            --jq '.[].head.ref' \
+            | sed 's#^#refs/heads/#' > pr_refs.txt
+          echo "Open PR branches:"; cat pr_refs.txt || echo "(none)"
 
-          gh api --paginate \
-            "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-            --jq '.actions_caches' > caches.json
+          # 2. Every cache in the repo, flattened into one array across pages.
+          gh api --paginate "/repos/$REPO/actions/caches?per_page=100" \
+            --jq '.actions_caches[]' | jq -s '.' > caches.json
+          echo "Total caches found: $(jq 'length' caches.json)"
 
-          echo "Found $(jq 'length' caches.json) cache(s) for ref $REF"
+          # 3. Split into PR-branch caches vs. everything else.
+          jq -R -s 'split("\n") | map(select(length > 0))' pr_refs.txt > pr_refs.json
 
-          if [ "$EVENT" = "pull_request" ]; then
-            jq -r '.[].id' caches.json > stale_ids.txt
-          else
-            jq -r '
-              map(select(.key | test("^index-buildkit-1-")))
-              | group_by(.key | sub("#[0-9]+$"; ""))
-              | .[]
-              | sort_by(.key | capture("#(?<v>[0-9]+)$").v | tonumber) | reverse
-              | .[1:][]
-              | .id
-            ' caches.json > stale_ids.txt
-          fi
+          jq -c --slurpfile prrefs pr_refs.json \
+            '[.[] | select(.ref as $r | $prrefs[0] | index($r))]' \
+            caches.json > pr_caches.json
+          jq -c --slurpfile prrefs pr_refs.json \
+            '[.[] | select(.ref as $r | ($prrefs[0] | index($r)) | not)]' \
+            caches.json > branch_caches.json
 
-          echo "Deleting $(wc -l < stale_ids.txt) cache(s)."
+          echo "PR-branch caches to delete: $(jq 'length' pr_caches.json)"
+          echo "Non-PR branch caches to inspect: $(jq 'length' branch_caches.json)"
+
+          # 4. PR-branch caches: delete everything, no exceptions.
+          jq -r '.[].id' pr_caches.json > stale_ids.txt
+
+          # 5. Non-PR branches: keep the newest index generation per
+          # (ref, scope), delete older generations. Blobs untouched.
+          jq -r '
+            map(select(.key | test("^index-buildkit-1-")))
+            | group_by(.ref + "::" + (.key | sub("#[0-9]+$"; "")))
+            | .[]
+            | sort_by(.key | capture("#(?<v>[0-9]+)$").v | tonumber) | reverse
+            | .[1:][]
+            | .id
+          ' branch_caches.json >> stale_ids.txt
+
+          echo "Deleting $(wc -l < stale_ids.txt) cache(s) total."
           xargs -r -P 8 -I{} gh api --method DELETE \
             "/repos/$REPO/actions/caches/{}" < stale_ids.txt
