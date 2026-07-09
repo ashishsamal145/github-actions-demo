@@ -93,7 +93,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           # Since this is workflow_dispatch, use the current ref (branch/tag)
-          REF: ${{ github.ref }}
+          # REF: ${{ github.ref }}
+          REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
         run: |
           echo "🧹 Cleaning caches for ref: $REF"
           
