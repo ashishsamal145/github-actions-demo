@@ -2,7 +2,7 @@ name: "Artifacts CleanUp "
 
 on:
   workflow_dispatch:
-    # types: [opened, synchronize, reopened, closed]
+
 
 jobs:
   build-and-scan:
