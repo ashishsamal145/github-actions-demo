@@ -110,7 +110,7 @@ jobs:
             --jq '.actions_caches[].ref' | sort -u | while read REF; do \
             echo "📁 Processing ref: $REF"; \
             gh api --paginate "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-              --jq '.actions_caches[].id' | tail -n +2 | \
+              --jq '.actions_caches[].id' | tail -n +1 | \
             xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}"; \
             echo "  ✅ Cleaned up caches for ref: $REF"; \
           done
