@@ -103,12 +103,20 @@ jobs:
           echo "🧹 Cleaning up caches"
           
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # PR: Delete ONLY PR merge ref caches (keep branch caches)
+            # PR: Delete ONLY PR merge ref caches (DO NOT touch branch caches)
             PR_REF="refs/pull/${{ github.event.pull_request.number }}/merge"
-            echo "🔴 PR #${{ github.event.pull_request.number }} - Deleting ALL caches for $PR_REF"
-            gh api --paginate "/repos/$REPO/actions/caches?ref=$PR_REF" \
-              --jq '.actions_caches[].id' | \
-              xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
+            echo "🔴 PR #${{ github.event.pull_request.number }} - Deleting ALL caches for $PR_REF only"
+            
+            # Get and delete ONLY PR merge ref caches
+            CACHE_IDS=$(gh api --paginate "/repos/$REPO/actions/caches?ref=$PR_REF" \
+              --jq '.actions_caches[].id' 2>/dev/null)
+            
+            if [ -n "$CACHE_IDS" ]; then
+              echo "$CACHE_IDS" | xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
+              echo "✅ PR caches deleted"
+            else
+              echo "✅ No PR caches found"
+            fi
           else
             # Branch push: Keep latest per ref, delete older ones (including orphaned PR caches)
             echo "🟢 Branch push - Keeping latest per ref"
