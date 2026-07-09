@@ -4,8 +4,9 @@ on:
   push:
     branches: [main, dev]
   pull_request:
-    branches: [main,dev]
+    branches: [main, dev]
     types: [opened, synchronize, reopened, closed]
+
 jobs:
   build-and-scan:
     name: Build and Scan
@@ -13,8 +14,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
-      packages: write  # Required for pushing to GHCR
-
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -35,13 +35,13 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=sha,format=long  # Unique SHA tag - NEVER overwritten
+            type=sha,format=long
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value={{date 'YYYYMMDD-HHmmss'}},enable={{is_default_branch}}  # Timestamp tag
-            type=raw,value=run-${{ github.run_number }},enable={{is_default_branch}}  # Run number tag
+            type=raw,value={{date 'YYYYMMDD-HHmmss'}},enable={{is_default_branch}}
+            type=raw,value=run-${{ github.run_number }},enable={{is_default_branch}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -65,7 +65,7 @@ jobs:
       - name: Generate SARIF report
         run: |
           trivy image --format sarif --output trivy-results.sarif ghcr.io/${{ github.repository }}:latest
-        continue-on-error: true  # Continue even if vulnerabilities found
+        continue-on-error: true
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -81,88 +81,49 @@ jobs:
           name: trivy-scan-report
           path: trivy-results.sarif
 
-  # 🧹 NEW: Cleanup job to delete caches for this run
+  # Cleanup job - runs only when PR is closed
   cleanup-artifacts:
     runs-on: ubuntu-latest
     needs: [build-and-scan]
-    # Run on PR close, schedule, or manual
+    # Run on ALL events (push, PR open, synchronize, reopened, closed)
     if: |
-      (github.event_name == 'pull_request' && github.event.action == 'closed') ||
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch'
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request'
     permissions:
       actions: write
       contents: read
     steps:
-      - name: Delete all caches except the latest for each ref
+      - name: Delete caches except latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
         run: |
-          echo "🧹 Starting cache cleanup (keeping latest only)"
+          echo "🧹 Cleaning caches for ref: $REF (keeping latest only)"
           
-          # Determine which refs to clean based on trigger
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # PR closed: Clean ONLY the PR's ref
-            REFS_TO_CLEAN=("refs/pull/${{ github.event.pull_request.number }}/merge")
-            echo "📌 PR closed - cleaning PR caches only"
-          elif [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # Scheduled/Manual: Clean ALL main branches
-            REFS_TO_CLEAN=("refs/heads/main" "refs/heads/dev")
-            echo "📌 Scheduled/Manual - cleaning main and dev branches"
-          else
-            # Fallback: Clean current ref
-            REFS_TO_CLEAN=("${{ github.ref }}")
-            echo "📌 Cleaning current ref only"
+          # Get all cache IDs sorted by last accessed (newest first)
+          CACHE_IDS=$(gh api --paginate \
+            "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
+            --jq '.actions_caches[].id' 2>/dev/null || echo "")
+          
+          if [ -z "$CACHE_IDS" ]; then
+            echo "✅ No caches found for ref: $REF"
+            exit 0
           fi
           
-          # Process each ref
-          for REF in "${REFS_TO_CLEAN[@]}"; do
-            echo ""
-            echo "📁 Processing ref: $REF"
-            
-            # Get all cache IDs for this ref (newest first)
-            CACHE_IDS=$(gh api --paginate \
-              "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-              --jq '.actions_caches[].id' 2>/dev/null || echo "")
-            
-            # Check if we got any caches
-            if [ -z "$CACHE_IDS" ]; then
-              echo "✅ No caches found for ref: $REF"
-              continue
+          TOTAL=$(echo "$CACHE_IDS" | wc -l | xargs)
+          echo "📊 Found $TOTAL caches for ref: $REF"
+          
+          LATEST=$(echo "$CACHE_IDS" | head -1)
+          echo "📌 Keeping latest cache ID: $LATEST"
+          
+          echo "$CACHE_IDS" | tail -n +2 | while read -r CACHE_ID; do
+            if [ -n "$CACHE_ID" ]; then
+              echo "🗑️ Deleting cache ID: $CACHE_ID"
+              gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" 2>/dev/null || echo "⚠️ Failed to delete"
             fi
-            
-            # Count total caches
-            TOTAL_COUNT=$(echo "$CACHE_IDS" | wc -l | xargs)
-            
-            if [ "$TOTAL_COUNT" -eq 0 ]; then
-              echo "✅ No caches found for ref: $REF"
-              continue
-            fi
-            
-            echo "📊 Found $TOTAL_COUNT caches for ref: $REF"
-            
-            # Get the first (latest) cache ID to keep
-            LATEST_CACHE=$(echo "$CACHE_IDS" | head -1)
-            echo "📌 Keeping latest cache ID: $LATEST_CACHE"
-            
-            # Delete all other caches (skip the first one)
-            DELETED_COUNT=0
-            echo "$CACHE_IDS" | tail -n +2 | while read -r CACHE_ID; do
-              if [ -n "$CACHE_ID" ]; then
-                echo "🗑️ Deleting old cache ID: $CACHE_ID"
-                if gh api --method DELETE "/repos/$REPO/actions/caches/$CACHE_ID" 2>/dev/null; then
-                  echo "✅ Successfully deleted cache $CACHE_ID"
-                  DELETED_COUNT=$((DELETED_COUNT + 1))
-                else
-                  echo "⚠️ Failed to delete cache $CACHE_ID"
-                fi
-              fi
-            done
-            
-            echo "✅ Kept latest cache ($LATEST_CACHE)"
-            echo "✅ Deleted $(echo "$CACHE_IDS" | tail -n +2 | wc -l | xargs) old caches for ref: $REF"
           done
           
-          echo ""
-          echo "🎉 Cache cleanup completed!"
+          DELETED=$(echo "$CACHE_IDS" | tail -n +2 | wc -l | xargs)
+          echo "✅ Kept latest cache ($LATEST)"
+          echo "✅ Deleted $DELETED old caches for ref: $REF"
