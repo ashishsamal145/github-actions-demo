@@ -96,29 +96,33 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Delete old caches (keep only current branch)
+      - name: Delete superseded caches for this ref, keep newest per key group
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          KEEP_BRANCH: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.event.pull_request.head.ref) || github.ref }}
+          # PR close -> refs/pull/<n>/merge ; push -> the pushed branch
+          REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
         run: |
-          echo "🧹 Keeping cache for: $KEEP_BRANCH"
-          
-          gh api --paginate "/repos/$REPO/actions/caches" --jq '.actions_caches[].ref' | sort -u | while read REF; do
-            if [[ "$REF" =~ ^refs/pull/ ]]; then
-              # Delete ALL PR caches
-              gh api --paginate "/repos/$REPO/actions/caches?ref=$REF" --jq '.actions_caches[].id' | \
-                xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
-            elif [[ "$REF" == "$KEEP_BRANCH" ]]; then
-              # Keep latest cache for current branch
-              gh api --paginate "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-                --jq '.actions_caches[].id' | tail -n +2 | \
-                xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
-            else
-              # Delete ALL caches for everything else
-              gh api --paginate "/repos/$REPO/actions/caches?ref=$REF" --jq '.actions_caches[].id' | \
-                xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
-            fi
-          done
+          echo "Cleaning caches for ref: $REF"
+
+          gh api --paginate \
+            "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
+            --jq '.actions_caches' > caches.json
+
+          # Group by normalized key (trailing hash stripped) so distinct cache
+          # families (Maven / npm / pip / Buildx gha scope) never compete with
+          # each other for "newest." Within each group, keep the most
+          # recently accessed entry and mark the rest for deletion.
+          jq -r '
+            group_by(.key | sub("[-_][0-9a-fA-F]{8,64}$"; ""))
+            | .[]
+            | sort_by(.last_accessed_at) | reverse
+            | .[1:][]
+            | .id
+          ' caches.json > stale_ids.txt
+
+          echo "Deleting $(wc -l < stale_ids.txt) superseded cache(s), keeping newest per key group."
+          xargs -r -P 8 -I{} gh api --method DELETE \
+            "/repos/$REPO/actions/caches/{}" < stale_ids.txt
 
           ################################
