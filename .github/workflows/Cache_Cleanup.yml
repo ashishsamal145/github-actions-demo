@@ -88,9 +88,7 @@ jobs:
     # ✅ FIXED: Remove 'cleanup' dependency so it runs on PRs
     needs: [build-and-scan,cleanup]
     # ✅ FIXED: Run on ALL events (push AND pull_request)
-    if: |
-      github.event_name == 'push' ||
-      github.event_name == 'pull_request'
+    if: always()
     permissions:
       actions: write
       contents: read
