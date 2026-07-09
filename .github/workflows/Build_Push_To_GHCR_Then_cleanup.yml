@@ -104,7 +104,12 @@ jobs:
           echo "Fetching versions and deleting old ones..."
 
           gh api /users/ashishsamal145/packages/container/github-actions-demo/versions \
-            --jq 'map(select(.metadata.container.tags | map(select(. == "purvankara" or . == "books")) | length == 0)) | .[1:] | .[].id' \
+            --jq '.[] | select((.metadata.container.tags // []) as $t | (($t | any(. == "latest" or . == "purvankara" or . == "books" or (startswith("buildcache-")))) | not)) | .id' \
             | xargs -r -P 8 -I{} gh api --method DELETE "/users/ashishsamal145/packages/container/github-actions-demo/versions/{}" \
             || echo "No versions to delete or error occurred"
+
+        # gh api /users/ashishsamal145/packages/container/github-actions-demo/versions \
+         #  --jq 'map(select(.metadata.container.tags | map(select(. == "purvankara" or . == "books")) | length == 0)) | .[1:] | .[].id' \
+         #   | xargs -r -P 8 -I{} gh api --method DELETE "/users/ashishsamal145/packages/container/github-actions-demo/versions/{}" \
+         #  || echo "No versions to delete or error occurred"
             
