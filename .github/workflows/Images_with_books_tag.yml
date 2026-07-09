@@ -33,7 +33,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=books  # Added books tag
+            type=raw,value=buildcache-books  # Added books tag
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
