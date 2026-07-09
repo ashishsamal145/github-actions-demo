@@ -87,6 +87,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
+    # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
   cleanup-artifacts:
     runs-on: ubuntu-latest
     needs: [cleanup]
@@ -94,22 +95,7 @@ jobs:
     permissions:
       actions: write
       contents: read
-    # steps:
-    #   - name: Delete old caches (keep latest per ref)
-    #     env:
-    #       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    #       REPO: ${{ github.repository }}
-    #     run: |
-    #       gh api --paginate "/repos/$REPO/actions/caches" --jq '.actions_caches[].ref' | sort -u | while read REF; do
-    #         if [[ "$REF" =~ ^refs/pull/ ]]; then
-    #           # Delete ALL PR caches
-    #           gh api --paginate "/repos/$REPO/actions/caches?ref=$REF" --jq '.actions_caches[].id' | xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
-    #         else
-    #           # Keep latest branch cache, delete rest
-    #           gh api --paginate "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" --jq '.actions_caches[].id' | tail -n +2 | xargs -r -P 8 -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}" || true
-    #         fi
-    #       done
-     steps:
+    steps:
       - name: Delete old caches (keep only current branch)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
