@@ -1,11 +1,7 @@
 name: "CleanUp Artifacts"
 
 on:
-  push:
-    branches: [main, dev]
-  pull_request:
-    branches: [main, dev]
-    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
 
 jobs:
   build-and-scan:
