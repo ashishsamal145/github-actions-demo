@@ -151,7 +151,7 @@ jobs:
   # ── 5. Clean up old GitHub Actions caches ──────────────────────────────────
   cleanup-artifacts:
     runs-on: ubuntu-latest
-    needs: []  # No dependencies - run independently
+    needs: [cleanup]  # No dependencies - run independently
     if: |
       github.event_name == 'push' ||
       github.event_name == 'pull_request'
