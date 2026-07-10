@@ -126,27 +126,23 @@ jobs:
           
           echo "Keeping latest cache for: $REF"
 
-          gh api --paginate "/repos/$REPO/actions/caches" \
-          | jq -r --arg ref "$REF" '
+          gh api --paginate "/repos/$REPO/actions/caches" |
+          jq -r '
             .actions_caches
             | (
-                # Delete all PR caches
                 map(select(.ref | startswith("refs/pull/")))
                 +
-                # Delete all branch caches except the latest for the target branch
                 (
-                  map(select(.ref == $ref))
-                  | sort_by(.last_accessed_at)
-                  | reverse
-                  | .[1:]
+                  group_by(.ref)
+                  | map(
+                      select(.[0].ref | startswith("refs/heads/"))
+                      | sort_by(.last_accessed_at)
+                      | reverse
+                      | .[1:]
+                    )
+                  | flatten
                 )
-                +
-                # Delete caches from every other branch
-                map(select(
-                  (.ref | startswith("refs/heads/"))
-                  and (.ref != $ref)
-                ))
               )
             | .[].id
-          ' | sort -u \
-          | xargs -r -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}"
+          ' |
+          xargs -r -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}"
