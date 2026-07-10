@@ -105,23 +105,48 @@ jobs:
   cleanup-artifacts:
     runs-on: ubuntu-latest
     needs: [cleanup]
+    # if: |
+    #   github.event_name == 'push' || github.event_name == 'pull_request'
     if: always()
+
     permissions:
       actions: write
       contents: read
+
     steps:
-      - name: Delete caches for this ref
+      - name: Delete old GitHub Actions caches
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          # PR close -> refs/pull/<n>/merge ; push -> the pushed branch
+          # REF: "${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.base_ref) || github.ref }}"
           REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
         run: |
-          echo "Cleaning caches for ref: $REF"
-          gh api --paginate \
-            "/repos/$REPO/actions/caches?ref=$REF&sort=last_accessed_at&direction=desc" \
-            --jq '.actions_caches[].id' \
-            | xargs -r -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}"
+          
+         
+          
+          echo "Keeping latest cache for: $REF"
 
-
-        ##############################################
+          gh api --paginate "/repos/$REPO/actions/caches" \
+          | jq -r --arg ref "$REF" '
+            .actions_caches
+            | (
+                # Delete all PR caches
+                map(select(.ref | startswith("refs/pull/")))
+                +
+                # Delete all branch caches except the latest for the target branch
+                (
+                  map(select(.ref == $ref))
+                  | sort_by(.last_accessed_at)
+                  | reverse
+                  | .[1:]
+                )
+                +
+                # Delete caches from every other branch
+                map(select(
+                  (.ref | startswith("refs/heads/"))
+                  and (.ref != $ref)
+                ))
+              )
+            | .[].id
+          ' | sort -u \
+          | xargs -r -I{} gh api --method DELETE "/repos/$REPO/actions/caches/{}"
