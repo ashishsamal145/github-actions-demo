@@ -18,3 +18,9 @@ jobs:
           echo "deploy-${{ github.ref }}"
           echo "Owner - ${{ github.repository_owner }}"
           echo "Actor - ${{ github.actor }}"
+  test_secret_variables:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checking Secret Variable"
+        run: |
+          echo "Secret Value : ${{ secrets.MY_KEY }}"
