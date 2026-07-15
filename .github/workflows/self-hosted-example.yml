@@ -1,0 +1,25 @@
+name: Build and Deploy on Ephemeral Runner
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    # Target the runner with the labels you defined in the CDK code [citation:1][citation:5]
+    runs-on: [self-hosted, my-ephemeral-runner] 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Build the project
+        run: |
+          # Your build commands here
+          echo "Building..."
+          mkdir -p dist
+          echo "Build artifact" > dist/output.txt
+
+      - name: Deploy artifact
+        run: |
+          # Example deployment command
+          echo "Deploying artifact from a fresh runner..."
+          cat dist/output.txt
