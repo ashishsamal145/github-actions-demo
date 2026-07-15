@@ -58,7 +58,7 @@ jobs:
 
   cleanup:
     name: Cleanup Old Images
-    runs-on: ubuntu-latest
+    runs-on: git-hub-actiondemo
     needs: build-and-scan
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.event_name == 'push' ||
       github.event_name == 'pull_request'
@@ -103,7 +103,7 @@ jobs:
   # build, but it's needless waste. GitHub's own 7-day-unused eviction reaps
   # orphaned blobs safely once nothing references them.
   cleanup-artifacts:
-    runs-on: ubuntu-latest
+    runs-on: git-hub-actiondemo
     needs: [cleanup]
     # if: |
     #   github.event_name == 'push' || github.event_name == 'pull_request'
