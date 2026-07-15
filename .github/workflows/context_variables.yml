@@ -19,7 +19,7 @@ jobs:
           echo "Owner - ${{ github.repository_owner }}"
           echo "Actor - ${{ github.actor }}"
   test_secret_variables:
-    runs-on: ubuntu-latest
+    runs-on: git-hub-actiondemo
     steps:
       - name: "Checking Secret Variable"
         run: |
