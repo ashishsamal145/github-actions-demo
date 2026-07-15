@@ -8,7 +8,7 @@ env:
 
 jobs:
   test_context_variables:
-    runs-on: ubuntu-latest
+    runs-on: git-hub-actiondemo
     steps:
       - name: "Checking Context Variable"
         run: |
