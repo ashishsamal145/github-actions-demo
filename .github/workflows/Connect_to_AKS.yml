@@ -39,5 +39,5 @@ jobs:
       with:
         action: deploy
         manifests: |
-          workflows/deployment.yaml
-          workflows/service.yaml
+          .github/deployment.yaml
+          .github/service.yaml
